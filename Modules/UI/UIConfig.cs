@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace GameFramework.Core
+namespace GameFramework.Core.UI
 {
     /// <summary>
     /// UI 配置数据结构

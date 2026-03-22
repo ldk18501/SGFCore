@@ -3,25 +3,36 @@ using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
+using PrimeTween;
 
-namespace GameFramework.Core
+namespace GameFramework.Core.UI
 {
     [RequireComponent(typeof(Canvas), typeof(GraphicRaycaster))]
     public abstract class UIFormBase : MonoBehaviour
     {
+        // 缓存面板内所有的动效组件
+        private UITweenElement[] _tweenElements;
+
         public int SerialId { get; internal set; }
         public UILayer Layer { get; internal set; }
         public int FormId { get; internal set; }
         public bool IsCached { get; internal set; } // 标记当前面板是否是缓存模式
-        
+
         private Canvas _canvas;
 
         // --- 生命周期追踪器 ---
         // 记录在这个 UI 上注册的所有事件
         private readonly Dictionary<Type, Delegate> _scopedEvents = new Dictionary<Type, Delegate>();
+
         // 记录在这个 UI 上动态加载的资源和预制体实例
         private readonly List<object> _scopedAssets = new List<object>();
         private readonly List<GameObject> _scopedInstances = new List<GameObject>();
+
+        protected virtual void Awake()
+        {
+            // true 表示包含隐藏的子节点
+            _tweenElements = GetComponentsInChildren<UITweenElement>(true);
+        }
 
         internal void InternalInit(int serialId, int formId, UILayer layer, bool isCached)
         {
@@ -29,9 +40,9 @@ namespace GameFramework.Core
             FormId = formId;
             Layer = layer;
             IsCached = isCached;
-            
+
             _canvas = GetComponent<Canvas>();
-            _canvas.overrideSorting = true; 
+            _canvas.overrideSorting = true;
         }
 
         internal void SetSortingOrder(int order)
@@ -42,7 +53,7 @@ namespace GameFramework.Core
         // ==========================================
         // UI 专属 API：自动管理的事件订阅
         // ==========================================
-        
+
         /// <summary>
         /// 订阅事件（面板关闭时会自动注销，极其安全）
         /// </summary>
@@ -68,6 +79,7 @@ namespace GameFramework.Core
                 // 为了简单高效，我们建议直接在 EventModule 提供一个 RemoveListener(Type, Delegate) 的重载
                 GameApp.Event.RemoveListener(kvp.Key, kvp.Value);
             }
+
             _scopedEvents.Clear();
         }
 
@@ -85,6 +97,7 @@ namespace GameFramework.Core
             {
                 _scopedAssets.Add(asset);
             }
+
             return asset;
         }
 
@@ -98,6 +111,7 @@ namespace GameFramework.Core
             {
                 _scopedInstances.Add(go);
             }
+
             return go;
         }
 
@@ -113,10 +127,21 @@ namespace GameFramework.Core
         // 生命周期流转
         // ==========================================
 
-        public virtual void OnInit() { }
-        public virtual void OnOpen(params object[] args) { }
-        public virtual void OnClose() { }
-        public virtual void OnDestroyUI() { }
+        public virtual void OnInit()
+        {
+        }
+
+        public virtual void OnOpen(params object[] args)
+        {
+        }
+
+        public virtual void OnClose()
+        {
+        }
+
+        public virtual void OnDestroyUI()
+        {
+        }
 
         // 内部调用的生命周期包装器
         internal void InternalClose()
@@ -129,6 +154,63 @@ namespace GameFramework.Core
         {
             OnDestroyUI();
             UnloadAllResources(); // 彻底销毁时才释放图片和特效
+        }
+
+
+        // ==========================================
+        // 异步等待所有入场动画完成
+        // ==========================================
+        public async UniTask PlayOpenAnimationAsync()
+        {
+            if (_tweenElements == null || _tweenElements.Length == 0) return;
+
+            // 收集所有正在播放的动画序列
+            List<UniTask> tasks = new List<UniTask>(_tweenElements.Length);
+
+            foreach (var elem in _tweenElements)
+            {
+                if (elem.gameObject.activeInHierarchy)
+                {
+                    Sequence seq = elem.PlayIn();
+                    if (seq.isAlive)
+                    {
+                        tasks.Add(seq.ToUniTask());
+                    }
+                }
+            }
+
+            // 并发等待所有动画（包含延迟）彻底结束
+            if (tasks.Count > 0)
+            {
+                await UniTask.WhenAll(tasks);
+            }
+        }
+
+        // ==========================================
+        // 异步等待所有退场动画完成
+        // ==========================================
+        public async UniTask PlayCloseAnimationAsync()
+        {
+            if (_tweenElements == null || _tweenElements.Length == 0) return;
+
+            List<UniTask> tasks = new List<UniTask>(_tweenElements.Length);
+
+            foreach (var elem in _tweenElements)
+            {
+                if (elem.gameObject.activeInHierarchy)
+                {
+                    Sequence seq = elem.PlayOut();
+                    if (seq.isAlive)
+                    {
+                        tasks.Add(seq.ToUniTask());
+                    }
+                }
+            }
+
+            if (tasks.Count > 0)
+            {
+                await UniTask.WhenAll(tasks);
+            }
         }
     }
 }

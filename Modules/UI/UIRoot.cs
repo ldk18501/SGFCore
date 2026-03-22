@@ -1,7 +1,7 @@
 ﻿using UnityEngine;
 using System.Collections.Generic;
 
-namespace GameFramework.Core
+namespace GameFramework.Core.UI
 {
     /// <summary>
     /// UI 根节点实体类，挂载在 UIRoot 预制体上

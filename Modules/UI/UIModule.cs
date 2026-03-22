@@ -2,29 +2,30 @@
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+using GameFramework.Core.UI;
 
 namespace GameFramework.Core
 {
     public class UIModule : IFrameworkModule
     {
-        public int Priority => 50; 
-        private const int ORDER_STEP = 10; 
+        public int Priority => 50;
+        private const int ORDER_STEP = 10;
 
         private readonly Dictionary<int, UIFormConfig> _configs = new Dictionary<int, UIFormConfig>();
         private UIRoot _uiRoot;
-        
+
         // --- 新增：缓存池回收节点 ---
-        private Transform _recyclePoolNode; 
+        private Transform _recyclePoolNode;
 
         // 记录所有活跃状态的 UI (SerialId -> 实例)
         private readonly Dictionary<int, UIFormBase> _activeForms = new Dictionary<int, UIFormBase>();
-        
+
         // 记录各层级的激活列表，用于计算 SortingOrder
         private readonly Dictionary<UILayer, List<UIFormBase>> _layerActiveList = new Dictionary<UILayer, List<UIFormBase>>();
-        
+
         // --- 新增：休眠缓存池 (FormId -> 实例) ---
         private readonly Dictionary<int, UIFormBase> _cachedForms = new Dictionary<int, UIFormBase>();
-        
+
         // --- 新增：单例模式记录器 (FormId -> 正在显示的 SerialId) ---
         private readonly Dictionary<int, int> _singletonForms = new Dictionary<int, int>();
 
@@ -44,7 +45,7 @@ namespace GameFramework.Core
                 rootInstance.name = "[Framework_UIRoot]";
                 UnityEngine.Object.DontDestroyOnLoad(rootInstance);
                 _uiRoot = rootInstance.GetComponent<UIRoot>();
-                
+
                 // 动态创建一个隐藏层，用于存放被缓存的 UI
                 GameObject recycleNode = new GameObject("RecyclePool_Hidden");
                 recycleNode.transform.SetParent(_uiRoot.transform, false);
@@ -56,15 +57,20 @@ namespace GameFramework.Core
 
         public void RegisterUI(int formId, string address, Type type, UILayer layer, bool isSingleton = true, bool isCached = true)
         {
-            _configs[formId] = new UIFormConfig 
-            { 
-                FormId = formId, PrefabAddress = address, ScriptType = type, 
-                Layer = layer, IsSingleton = isSingleton, IsCached = isCached 
+            _configs[formId] = new UIFormConfig
+            {
+                FormId = formId, PrefabAddress = address, ScriptType = type,
+                Layer = layer, IsSingleton = isSingleton, IsCached = isCached
             };
         }
-        
-        public void OnUpdate(float deltaTime, float unscaledDeltaTime) { }
-        public void OnDestroy() { }
+
+        public void OnUpdate(float deltaTime, float unscaledDeltaTime)
+        {
+        }
+
+        public void OnDestroy()
+        {
+        }
 
         // ==========================================
         // 核心：打开界面的终极逻辑
@@ -93,11 +99,11 @@ namespace GameFramework.Core
                 form = cachedForm;
                 serialId = form.SerialId;
                 _cachedForms.Remove(formId); // 移出休眠池
-                
+
                 // 重新挂载到正确的渲染层级，并激活
                 form.transform.SetParent(_uiRoot.GetLayerNode(config.Layer), false);
                 form.gameObject.SetActive(true);
-                
+
                 Log.Info($"[UI] 极速秒开缓存界面: {form.GetType().Name}");
             }
             else
@@ -109,7 +115,7 @@ namespace GameFramework.Core
 
                 form = uiInstance.GetComponent(config.ScriptType) as UIFormBase;
                 serialId = _nextSerialId++;
-                
+
                 form.InternalInit(serialId, formId, config.Layer, config.IsCached);
                 form.OnInit(); // 只有全新实例化才调用 OnInit
             }
@@ -117,9 +123,12 @@ namespace GameFramework.Core
             // 4. 记录状态与生命周期
             _activeForms[serialId] = form;
             if (config.IsSingleton) _singletonForms[formId] = serialId;
-            
+
             RefreshSortingOrder(form, config.Layer);
             form.OnOpen(args); // 无论怎样都会调用 OnOpen
+
+            // 5. 播放惊艳的入场动画！(不阻塞业务逻辑，让动画自己去飞)
+            form.PlayOpenAnimationAsync().Forget();
 
             return serialId;
         }
@@ -137,13 +146,49 @@ namespace GameFramework.Core
             // 2. 从活跃列表移除
             _activeForms.Remove(serialId);
             _layerActiveList[form.Layer].Remove(form);
-            
+
             if (_configs[form.FormId].IsSingleton)
             {
                 _singletonForms.Remove(form.FormId);
             }
 
             // 3. 【缓存判定】
+            if (form.IsCached)
+            {
+                // 丢进回收站，静默挂起
+                form.transform.SetParent(_recyclePoolNode, false);
+                _cachedForms[form.FormId] = form;
+                Log.Info($"[UI] 面板已休眠至缓存池: {form.GetType().Name}");
+            }
+            else
+            {
+                // 彻底粉碎（会触发 OnDestroyUI 和自动清理资源）
+                form.InternalDestroy();
+                GameApp.Res.ReleaseInstance(form.gameObject);
+                Log.Info($"[UI] 面板已彻底销毁: {form.GetType().Name}");
+            }
+        }
+
+        public async UniTask CloseUIAsync(int serialId)
+        {
+            if (!_activeForms.TryGetValue(serialId, out UIFormBase form)) return;
+
+            // 1. 触发内部关闭流程（会触发 OnClose 和自动清理事件）
+            form.InternalClose();
+
+            // 2. 从活跃列表移除
+            _activeForms.Remove(serialId);
+            _layerActiveList[form.Layer].Remove(form);
+
+            if (_configs[form.FormId].IsSingleton)
+            {
+                _singletonForms.Remove(form.FormId);
+            }
+            
+            // 3. 等待退场动画播完
+            await form.PlayCloseAnimationAsync();
+
+            // 4. 【缓存判定】
             if (form.IsCached)
             {
                 // 丢进回收站，静默挂起

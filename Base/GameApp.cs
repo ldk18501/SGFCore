@@ -46,6 +46,9 @@ namespace GameFramework.Core
 
         private static LocalizationModule _loc;
         public static LocalizationModule Loc => _loc ??= FrameworkEntry.Instance.GetModule<LocalizationModule>();
+        
+        private static HttpModule _http;
+        public static HttpModule Http => _http ??= FrameworkEntry.Instance.GetModule<HttpModule>();
 
         // 甚至可以封装一些最常用的组合操作
         // 例如：极简的全局抛事件接口

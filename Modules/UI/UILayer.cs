@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-namespace GameFramework.Core
+namespace GameFramework.Core.UI
 {
     /// <summary>
     /// UI 渲染层级定义
