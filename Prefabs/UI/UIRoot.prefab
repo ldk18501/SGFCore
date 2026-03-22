@@ -10,6 +10,8 @@ GameObject:
   m_Component:
   - component: {fileID: 5535772362115331015}
   - component: {fileID: 2129506154033382173}
+  - component: {fileID: 6838237755340421045}
+  - component: {fileID: 87585704471087737}
   m_Layer: 0
   m_Name: UIRoot
   m_TagString: Untagged
@@ -61,6 +63,43 @@ Canvas:
   m_SortingLayerID: 0
   m_SortingOrder: 0
   m_TargetDisplay: 0
+--- !u!114 &6838237755340421045
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1641356608812722051}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc42784cf147c0c48a680349fa168899, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_IgnoreReversedGraphics: 1
+  m_BlockingObjects: 0
+  m_BlockingMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+--- !u!114 &87585704471087737
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1641356608812722051}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b9b41f0f77d64fe68eca0824e54df203, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  RootCanvas: {fileID: 2129506154033382173}
+  UICamera: {fileID: 7860929126324434211}
+  Transform_Background: {fileID: 2270987006402102320}
+  Transform_Common: {fileID: 8354034211694372371}
+  Transform_Popup: {fileID: 2854366310257026455}
+  Transform_Top: {fileID: 339084519986494543}
+  Transform_Guide: {fileID: 2161815372222667435}
+  Transform_System: {fileID: 6532635420497135217}
 --- !u!1 &3849491865456459627
 GameObject:
   m_ObjectHideFlags: 0
