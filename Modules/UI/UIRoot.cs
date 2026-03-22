@@ -7,7 +7,7 @@ namespace GameFramework.Core.UI
     /// UI 根节点实体类，挂载在 UIRoot 预制体上
     /// 方便在 Editor 中直接配置和预览
     /// </summary>
-    public class UIRoot : MonoBehaviour
+    public class UIRoot : TMonoSingleton<UIRoot>
     {
         [Header("Canvas 设置")]
         public Canvas RootCanvas;
