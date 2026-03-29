@@ -50,6 +50,9 @@ namespace GameFramework.Core
         private static HttpModule _http;
         public static HttpModule Http => _http ??= FrameworkEntry.Instance.GetModule<HttpModule>();
 
+        private static SceneModule _scene;
+        public static SceneModule Scene => _scene ??= FrameworkEntry.Instance.GetModule<SceneModule>();
+
         // 甚至可以封装一些最常用的组合操作
         // 例如：极简的全局抛事件接口
         public static void Broadcast<T>(T eventData) where T : struct
