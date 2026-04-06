@@ -39,21 +39,21 @@ namespace GameFramework.Core
                 _layerActiveList[layer] = new List<UIFormBase>();
             }
 
-            GameObject rootPrefab = Resources.Load<GameObject>("UI/UIRoot");
-            if (rootPrefab != null)
+            // 优先查找场景中已存在的 UIRoot
+            _uiRoot = UnityEngine.Object.FindObjectOfType<UIRoot>();
+            if (_uiRoot == null)
             {
-                GameObject rootInstance = UnityEngine.Object.Instantiate(rootPrefab);
-                rootInstance.name = "[Framework_UIRoot]";
-                UnityEngine.Object.DontDestroyOnLoad(rootInstance);
-                _uiRoot = rootInstance.GetComponent<UIRoot>();
-
-                // 动态创建一个隐藏层，用于存放被缓存的 UI
-                GameObject recycleNode = new GameObject("RecyclePool_Hidden");
-                recycleNode.transform.SetParent(_uiRoot.transform, false);
-                recycleNode.SetActive(false); // 整个节点隐藏
-                _recyclePoolNode = recycleNode.transform;
+                Log.Error("[UIModule] 场景中未找到 UIRoot，请将 UIRoot 预制体拖入场景。");
+                return;
             }
-            // ...
+
+            UnityEngine.Object.DontDestroyOnLoad(_uiRoot.gameObject);
+
+            // 动态创建隐藏缓存层
+            var recycleNode = new GameObject("RecyclePool_Hidden");
+            recycleNode.transform.SetParent(_uiRoot.transform, false);
+            recycleNode.SetActive(false);
+            _recyclePoolNode = recycleNode.transform;
         }
 
         public void RegisterUI(int formId, string address, Type type, UILayer layer, bool isSingleton = true, bool isCached = true)
