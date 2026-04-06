@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using GameFramework.Core.UI;
@@ -208,6 +209,12 @@ namespace GameFramework.Core
         private void RefreshSortingOrder(UIFormBase form, UILayer layer)
         {
             var list = _layerActiveList[layer];
+
+            if (list.Count > 0 && list[list.Count - 1] == form)
+            {
+                return;
+            }
+
             if (list.Contains(form)) list.Remove(form);
             list.Add(form);
 
@@ -216,6 +223,21 @@ namespace GameFramework.Core
             {
                 list[i].SetSortingOrder(baseOrder + (i + 1) * ORDER_STEP);
             }
+        }
+
+        public async UniTask<T> OpenUIAsync<T>(params object[] args) where T : UIFormBase
+        {
+            var config = _configs.Values.FirstOrDefault(c => c.ScriptType == typeof(T));
+            if (config == null) return null;
+
+            int serialId = await OpenUIAsync(config.FormId, args);
+            return _activeForms.TryGetValue(serialId, out var form) ? form as T : null;
+        }
+
+        public void CloseUI<T>() where T : UIFormBase
+        {
+            var form = _activeForms.Values.FirstOrDefault(f => f is T);
+            if (form != null) CloseUI(form.SerialId);
         }
     }
 }

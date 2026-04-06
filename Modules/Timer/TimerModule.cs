@@ -15,9 +15,10 @@ namespace GameFramework.Core
             public float Delay;
             public bool IsUnscaled;
             public int LoopCount; // -1 表示无限循环，>0 表示特定次数
-            
+
             public float CurrentTime;
             public bool IsDone;
+            public bool IsPaused;
 
             public void Clear()
             {
@@ -28,6 +29,7 @@ namespace GameFramework.Core
                 LoopCount = 0;
                 CurrentTime = 0;
                 IsDone = false;
+                IsPaused = false;
             }
         }
 
@@ -43,11 +45,10 @@ namespace GameFramework.Core
 
         public void OnUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            // 倒序遍历，方便在遍历时直接移除完成的任务，并且安全处理回调中新增定时器的情况
             for (int i = _tasks.Count - 1; i >= 0; i--)
             {
                 var task = _tasks[i];
-                if (task.IsDone) continue;
+                if (task.IsDone || task.IsPaused) continue;
 
                 task.CurrentTime += task.IsUnscaled ? unscaledDeltaTime : deltaTime;
 
@@ -61,11 +62,11 @@ namespace GameFramework.Core
                     {
                         task.IsDone = true;
                         _tasks.RemoveAt(i);
-                        _pool.ReleaseClass(task); // 回收进内存池
+                        _pool.ReleaseClass(task);
                     }
                     else
                     {
-                        task.CurrentTime -= task.Delay; // 扣除延迟时间，准备下一次循环（保证精度）
+                        task.CurrentTime -= task.Delay;
                     }
                 }
             }
@@ -117,6 +118,35 @@ namespace GameFramework.Core
                     break;
                 }
             }
+        }
+
+        public void PauseTimer(long timerId)
+        {
+            var task = _tasks.Find(t => t.Id == timerId);
+            if (task != null) task.IsPaused = true;
+        }
+
+        public void ResumeTimer(long timerId)
+        {
+            var task = _tasks.Find(t => t.Id == timerId);
+            if (task != null) task.IsPaused = false;
+        }
+
+        public float GetRemainingTime(long timerId)
+        {
+            var task = _tasks.Find(t => t.Id == timerId);
+            return task != null ? task.Delay - task.CurrentTime : 0f;
+        }
+
+        public void CancelAllTimers()
+        {
+            foreach (var task in _tasks) _pool.ReleaseClass(task);
+            _tasks.Clear();
+        }
+
+        public int GetActiveTimerCount()
+        {
+            return _tasks.Count;
         }
     }
 }

@@ -11,10 +11,10 @@ namespace GameFramework.Core
     public class EventModule : IFrameworkModule
     {
         // 优先级设置得非常高（值越小越早），因为其他模块初始化时可能就需要注册事件
-        public int Priority => 10; 
+        public int Priority => 10;
 
-        // 存储所有事件委托的字典
-        private readonly Dictionary<Type, Delegate> _delegates = new Dictionary<Type, Delegate>();
+        // 存储所有事件委托的字典（使用List避免Delegate.Combine的GC）
+        private readonly Dictionary<Type, List<Delegate>> _delegates = new Dictionary<Type, List<Delegate>>();
 
         public void OnInit()
         {
@@ -40,15 +40,12 @@ namespace GameFramework.Core
         public void AddListener<T>(Action<T> handler) where T : struct
         {
             Type type = typeof(T);
-            if (_delegates.TryGetValue(type, out Delegate currentDel))
+            if (!_delegates.TryGetValue(type, out var list))
             {
-                // 合并委托
-                _delegates[type] = Delegate.Combine(currentDel, handler);
+                list = new List<Delegate>();
+                _delegates[type] = list;
             }
-            else
-            {
-                _delegates[type] = handler;
-            }
+            list.Add(handler);
         }
 
         /// <summary>
@@ -59,35 +56,24 @@ namespace GameFramework.Core
         public void RemoveListener<T>(Action<T> handler) where T : struct
         {
             Type type = typeof(T);
-            if (_delegates.TryGetValue(type, out Delegate currentDel))
+            if (_delegates.TryGetValue(type, out var list))
             {
-                // 移除委托
-                Delegate newDel = Delegate.Remove(currentDel, handler);
-                if (newDel == null)
+                list.Remove(handler);
+                if (list.Count == 0)
                 {
-                    _delegates.Remove(type); // 如果该事件没有监听者了，从字典中移除键值对，节省内存
-                }
-                else
-                {
-                    _delegates[type] = newDel;
+                    _delegates.Remove(type);
                 }
             }
         }
         
-        //  GameApp.Event.RemoveListener(kvp.Key, kvp.Value);
         public void RemoveListener(Type type, Delegate handler)
         {
-            if (_delegates.TryGetValue(type, out Delegate currentDel))
+            if (_delegates.TryGetValue(type, out var list))
             {
-                // 移除委托
-                Delegate newDel = Delegate.Remove(currentDel, handler);
-                if (newDel == null)
+                list.Remove(handler);
+                if (list.Count == 0)
                 {
-                    _delegates.Remove(type); // 如果该事件没有监听者了，从字典中移除键值对，节省内存
-                }
-                else
-                {
-                    _delegates[type] = newDel;
+                    _delegates.Remove(type);
                 }
             }
         }
@@ -102,14 +88,19 @@ namespace GameFramework.Core
         public void Broadcast<T>(T eventData) where T : struct
         {
             Type type = typeof(T);
-            if (_delegates.TryGetValue(type, out Delegate currentDel))
+            if (_delegates.TryGetValue(type, out var list))
             {
-                // 转型并执行
-                if (currentDel is Action<T> action)
+                for (int i = 0; i < list.Count; i++)
                 {
-                    action.Invoke(eventData);
+                    ((Action<T>)list[i]).Invoke(eventData);
                 }
             }
+        }
+
+        public int GetListenerCount<T>() where T : struct
+        {
+            Type type = typeof(T);
+            return _delegates.TryGetValue(type, out var list) ? list.Count : 0;
         }
     }
 }
