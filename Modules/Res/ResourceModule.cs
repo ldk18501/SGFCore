@@ -1,44 +1,142 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
-using Cysharp.Threading.Tasks;
 
 namespace GameFramework.Core
 {
     /// <summary>
     /// 全局资源管理模块 (基于 Addressables)
-    /// 提供极致简洁的 async/await 异步加载和安全的内存释放机制
+    /// 统一负责 Addressables 初始化、加载句柄追踪、实例释放和泄漏审计。
     /// </summary>
     public class ResourceModule : IFrameworkModule
     {
         public int Priority => 40; // 优先级排在文件系统和日志之后
 
-        private bool _isInitialized = false;
+        private readonly Dictionary<UnityEngine.Object, Stack<AssetHandleRecord>> _assetHandles =
+            new Dictionary<UnityEngine.Object, Stack<AssetHandleRecord>>();
+
+        private readonly Dictionary<GameObject, InstanceHandleRecord> _instanceHandles =
+            new Dictionary<GameObject, InstanceHandleRecord>();
+
+        private Task _initializeTask;
+        private Exception _initializeException;
+        private bool _isInitialized;
+        private bool _isDestroyed;
+        private int _pendingOperationCount;
+
+        public bool IsInitialized => _isInitialized;
+        public int PendingOperationCount => _pendingOperationCount;
+        public int TrackedAssetCount => _assetHandles.Count;
+        public int TrackedInstanceCount => _instanceHandles.Count;
 
         public void OnInit()
         {
-            // 异步初始化 Addressables
-            InitializeAddressables();
+            _isDestroyed = false;
+            _initializeTask = InitializeAddressablesAsync();
         }
 
-        private async void InitializeAddressables()
+        private async Task InitializeAddressablesAsync()
         {
+            AsyncOperationHandle handle = default;
             try
             {
-                var handle = Addressables.InitializeAsync();
+                handle = Addressables.InitializeAsync(false);
                 await handle.Task;
-                _isInitialized = true;
-                Log.Module("Resource", "Addressables 系统初始化完成！");
+
+                if (handle.Status == AsyncOperationStatus.Succeeded)
+                {
+                    _isInitialized = true;
+                    _initializeException = null;
+                    Log.Module("Resource", "Addressables 系统初始化完成！");
+                }
+                else
+                {
+                    _initializeException = handle.OperationException ??
+                                           new Exception("Addressables 初始化返回 Failed 状态。");
+                    Log.Fatal($"[Resource] Addressables 初始化失败: {_initializeException.Message}");
+                }
             }
             catch (Exception e)
             {
+                _initializeException = e;
                 Log.Fatal($"[Resource] Addressables 初始化失败: {e.Message}");
+            }
+            finally
+            {
+                ReleaseHandle(handle);
             }
         }
 
         public void OnUpdate(float deltaTime, float unscaledDeltaTime) { }
-        public void OnDestroy() { }
+
+        public void OnDestroy()
+        {
+            _isDestroyed = true;
+
+            int assetHandleCount = CountTrackedAssetHandles();
+            if (assetHandleCount > 0 || _instanceHandles.Count > 0)
+            {
+                Log.Warning(
+                    $"[Resource] 模块销毁时仍有未释放资源，自动清理。AssetHandles: {assetHandleCount}, Instances: {_instanceHandles.Count}");
+            }
+
+            ReleaseAllInstances();
+            ReleaseAllAssets();
+
+            _isInitialized = false;
+            _initializeTask = null;
+            _initializeException = null;
+            _pendingOperationCount = 0;
+        }
+
+        /// <summary>
+        /// 等待 Addressables 初始化完成。建议在启动流程或热更流程正式加载资源前显式调用。
+        /// </summary>
+        public async UniTask<bool> EnsureInitializedAsync(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (_isInitialized) return true;
+
+            if (_isDestroyed)
+            {
+                Log.Warning("[Resource] 模块已经销毁，无法初始化 Addressables。");
+                return false;
+            }
+
+            if (_initializeTask == null)
+            {
+                _initializeTask = InitializeAddressablesAsync();
+            }
+
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await _initializeTask;
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch (Exception e)
+            {
+                _initializeException = e;
+                Log.Fatal($"[Resource] 等待 Addressables 初始化时发生异常: {e.Message}");
+                return false;
+            }
+
+            if (_initializeException != null)
+            {
+                Log.Fatal($"[Resource] Addressables 尚未初始化成功: {_initializeException.Message}");
+                return false;
+            }
+
+            return _isInitialized;
+        }
 
         // ==========================================
         // API: 加载与实例化 (基于 async/await)
@@ -52,9 +150,65 @@ namespace GameFramework.Core
         /// <returns>加载完成的资源对象</returns>
         public async UniTask<T> LoadAssetAsync<T>(string address) where T : UnityEngine.Object
         {
-            // ...
-            // 使用 ToUniTask() 无缝衔接
-            return await Addressables.LoadAssetAsync<T>(address).ToUniTask(); 
+            return await LoadAssetAsync<T>(address, default(CancellationToken));
+        }
+
+        public async UniTask<T> LoadAssetAsync<T>(string address, CancellationToken cancellationToken)
+            where T : UnityEngine.Object
+        {
+            if (string.IsNullOrEmpty(address))
+            {
+                Log.Error("[Resource] LoadAssetAsync 失败：address 为空。");
+                return null;
+            }
+
+            if (!await EnsureInitializedAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            AsyncOperationHandle<T> handle = default;
+            _pendingOperationCount++;
+
+            try
+            {
+                handle = Addressables.LoadAssetAsync<T>(address);
+                T asset = await handle.ToUniTask(cancellationToken: cancellationToken);
+
+                if (_isDestroyed)
+                {
+                    ReleaseHandle(handle);
+                    return null;
+                }
+
+                if (handle.Status != AsyncOperationStatus.Succeeded || asset == null)
+                {
+                    LogLoadFailure("加载资源", address, handle.OperationException);
+                    ReleaseHandle(handle);
+                    return null;
+                }
+
+                TrackAssetHandle(asset, handle, address, typeof(T));
+                return asset;
+            }
+            catch (OperationCanceledException)
+            {
+                ReleaseHandle(handle);
+                return null;
+            }
+            catch (Exception e)
+            {
+                LogLoadFailure("加载资源", address, e);
+                ReleaseHandle(handle);
+                return null;
+            }
+            finally
+            {
+                if (_pendingOperationCount > 0)
+                {
+                    _pendingOperationCount--;
+                }
+            }
         }
 
      
@@ -68,10 +222,74 @@ namespace GameFramework.Core
         /// <returns>实例化出的 GameObject</returns>
         public async UniTask<GameObject> InstantiateAsync(string address, Transform parent = null, bool instantiateInWorldSpace = false)
         {
-            // ...
-            var go = await Addressables.InstantiateAsync(address, parent, instantiateInWorldSpace).ToUniTask();
-            go.name = go.name.Replace("(Clone)", "");
-            return go;
+            return await InstantiateAsync(address, parent, instantiateInWorldSpace, default(CancellationToken));
+        }
+
+        public async UniTask<GameObject> InstantiateAsync(string address, Transform parent, CancellationToken cancellationToken)
+        {
+            return await InstantiateAsync(address, parent, false, cancellationToken);
+        }
+
+        public async UniTask<GameObject> InstantiateAsync(
+            string address,
+            Transform parent,
+            bool instantiateInWorldSpace,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(address))
+            {
+                Log.Error("[Resource] InstantiateAsync 失败：address 为空。");
+                return null;
+            }
+
+            if (!await EnsureInitializedAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            AsyncOperationHandle<GameObject> handle = default;
+            _pendingOperationCount++;
+
+            try
+            {
+                handle = Addressables.InstantiateAsync(address, parent, instantiateInWorldSpace);
+                GameObject instance = await handle.ToUniTask(cancellationToken: cancellationToken);
+
+                if (_isDestroyed)
+                {
+                    ReleaseInstanceHandle(handle);
+                    return null;
+                }
+
+                if (handle.Status != AsyncOperationStatus.Succeeded || instance == null)
+                {
+                    LogLoadFailure("实例化资源", address, handle.OperationException);
+                    ReleaseHandle(handle);
+                    return null;
+                }
+
+                instance.name = instance.name.Replace("(Clone)", "");
+                _instanceHandles[instance] = new InstanceHandleRecord(handle, address);
+                return instance;
+            }
+            catch (OperationCanceledException)
+            {
+                ReleaseInstanceHandle(handle);
+                return null;
+            }
+            catch (Exception e)
+            {
+                LogLoadFailure("实例化资源", address, e);
+                ReleaseInstanceHandle(handle);
+                return null;
+            }
+            finally
+            {
+                if (_pendingOperationCount > 0)
+                {
+                    _pendingOperationCount--;
+                }
+            }
         }
 
 
@@ -85,7 +303,26 @@ namespace GameFramework.Core
         public void ReleaseAsset(object asset)
         {
             if (asset == null) return;
-            Addressables.Release(asset);
+
+            if (!(asset is UnityEngine.Object unityAsset))
+            {
+                Log.Warning($"[Resource] ReleaseAsset 忽略非 UnityEngine.Object 对象: {asset.GetType().Name}");
+                return;
+            }
+
+            if (!_assetHandles.TryGetValue(unityAsset, out var handles) || handles.Count == 0)
+            {
+                Log.Warning($"[Resource] ReleaseAsset 找不到资源句柄，可能重复释放或资源不是由 ResourceModule 加载: {GetSafeObjectName(unityAsset)}");
+                return;
+            }
+
+            AssetHandleRecord record = handles.Pop();
+            ReleaseHandle(record.Handle);
+
+            if (handles.Count == 0)
+            {
+                _assetHandles.Remove(unityAsset);
+            }
         }
 
         /// <summary>
@@ -94,10 +331,167 @@ namespace GameFramework.Core
         /// </summary>
         public void ReleaseInstance(GameObject instance)
         {
-            if (instance == null) return;
-            
-            // 底层会自动销毁 GameObject 并减少 Prefab 的引用计数
-            Addressables.ReleaseInstance(instance); 
+            if (ReferenceEquals(instance, null)) return;
+
+            if (!_instanceHandles.TryGetValue(instance, out var record))
+            {
+                Log.Warning($"[Resource] ReleaseInstance 找不到实例句柄，改用 Destroy 清理对象: {GetSafeObjectName(instance)}");
+                if (instance != null)
+                {
+                    UnityEngine.Object.Destroy(instance);
+                }
+                return;
+            }
+
+            _instanceHandles.Remove(instance);
+            ReleaseInstanceHandle(record.Handle);
+        }
+
+        /// <summary>
+        /// 主动释放所有已追踪资源。通常只在切换大流程或退出游戏时调用。
+        /// </summary>
+        public void ReleaseAll()
+        {
+            ReleaseAllInstances();
+            ReleaseAllAssets();
+        }
+
+        public ResourceUsageSnapshot GetUsageSnapshot()
+        {
+            return new ResourceUsageSnapshot(
+                _isInitialized,
+                _pendingOperationCount,
+                CountTrackedAssetHandles(),
+                _assetHandles.Count,
+                _instanceHandles.Count);
+        }
+
+        private void TrackAssetHandle(UnityEngine.Object asset, AsyncOperationHandle handle, string address, Type assetType)
+        {
+            if (!_assetHandles.TryGetValue(asset, out var handles))
+            {
+                handles = new Stack<AssetHandleRecord>();
+                _assetHandles[asset] = handles;
+            }
+
+            handles.Push(new AssetHandleRecord(handle, address, assetType));
+        }
+
+        private void ReleaseAllAssets()
+        {
+            foreach (var handles in _assetHandles.Values)
+            {
+                while (handles.Count > 0)
+                {
+                    ReleaseHandle(handles.Pop().Handle);
+                }
+            }
+
+            _assetHandles.Clear();
+        }
+
+        private void ReleaseAllInstances()
+        {
+            foreach (var record in _instanceHandles.Values)
+            {
+                ReleaseInstanceHandle(record.Handle);
+            }
+
+            _instanceHandles.Clear();
+        }
+
+        private int CountTrackedAssetHandles()
+        {
+            int count = 0;
+            foreach (var handles in _assetHandles.Values)
+            {
+                count += handles.Count;
+            }
+
+            return count;
+        }
+
+        private static void ReleaseHandle(AsyncOperationHandle handle)
+        {
+            if (handle.IsValid())
+            {
+                Addressables.Release(handle);
+            }
+        }
+
+        private static void ReleaseInstanceHandle(AsyncOperationHandle<GameObject> handle)
+        {
+            if (handle.IsValid())
+            {
+                if (handle.IsDone && handle.Status == AsyncOperationStatus.Succeeded)
+                {
+                    Addressables.ReleaseInstance(handle);
+                }
+                else
+                {
+                    Addressables.Release(handle);
+                }
+            }
+        }
+
+        private static void LogLoadFailure(string action, string address, Exception exception)
+        {
+            string reason = exception != null ? exception.Message : "未知错误";
+            Log.Error($"[Resource] {action}失败: {address}, 原因: {reason}");
+        }
+
+        private static string GetSafeObjectName(UnityEngine.Object obj)
+        {
+            return obj != null ? obj.name : "<destroyed>";
+        }
+
+        private readonly struct AssetHandleRecord
+        {
+            public readonly AsyncOperationHandle Handle;
+            public readonly string Address;
+            public readonly Type AssetType;
+
+            public AssetHandleRecord(AsyncOperationHandle handle, string address, Type assetType)
+            {
+                Handle = handle;
+                Address = address;
+                AssetType = assetType;
+            }
+        }
+
+        private readonly struct InstanceHandleRecord
+        {
+            public readonly AsyncOperationHandle<GameObject> Handle;
+            public readonly string Address;
+
+            public InstanceHandleRecord(AsyncOperationHandle<GameObject> handle, string address)
+            {
+                Handle = handle;
+                Address = address;
+            }
+        }
+
+        public readonly struct ResourceUsageSnapshot
+        {
+            public readonly bool IsInitialized;
+            public readonly int PendingOperationCount;
+            public readonly int AssetHandleCount;
+            public readonly int UniqueAssetCount;
+            public readonly int InstanceCount;
+
+            public ResourceUsageSnapshot(
+                bool isInitialized,
+                int pendingOperationCount,
+                int assetHandleCount,
+                int uniqueAssetCount,
+                int instanceCount)
+            {
+                IsInitialized = isInitialized;
+                PendingOperationCount = pendingOperationCount;
+                AssetHandleCount = assetHandleCount;
+                UniqueAssetCount = uniqueAssetCount;
+                InstanceCount = instanceCount;
+            }
         }
     }
 }

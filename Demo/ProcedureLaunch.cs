@@ -17,10 +17,13 @@ namespace GameFramework.Core.Demo
             // 1. 强制等待一帧，确保所有 MonoBehaviour 的 Awake/Start 彻底走完
             await UniTask.Yield();
 
-            // 2. 初始化 Addressables 资源系统 (这是个异步过程)
-            // 我们之前的 ResourceModule.OnInit 里面其实可以把 InitializeAddressables 暴露出来返回 UniTask
-            // 这里为了演示，假设它内部已经初始化好了，我们检查一下
-            // await GameApp.Res.EnsureInitializedAsync(); 
+            // 2. 初始化 Addressables 资源系统
+            bool resourceReady = await GameApp.Res.EnsureInitializedAsync();
+            if (!resourceReady)
+            {
+                Log.Fatal("[ProcedureLaunch] 资源系统初始化失败，启动流程中止。");
+                return;
+            }
 
             // TODO: 如果有热更新逻辑（Addressables CheckForCatalogUpdates），在这里执行
 
