@@ -43,9 +43,51 @@ namespace GameFramework.Core.Utility
         /// </summary>
         public static void ResetLocal(this Transform trans, float scale = 1f)
         {
+            if (trans == null) return;
             trans.localPosition = Vector3.zero;
             trans.localRotation = Quaternion.identity;
             trans.localScale = Vector3.one * scale;
+        }
+
+        public static void SetLocalPositionX(this Transform trans, float x)
+        {
+            if (trans == null) return;
+            Vector3 position = trans.localPosition;
+            position.x = x;
+            trans.localPosition = position;
+        }
+
+        public static void SetLocalPositionY(this Transform trans, float y)
+        {
+            if (trans == null) return;
+            Vector3 position = trans.localPosition;
+            position.y = y;
+            trans.localPosition = position;
+        }
+
+        public static Transform FindDeep(this Transform parent, string name)
+        {
+            if (parent == null || string.IsNullOrEmpty(name))
+            {
+                return null;
+            }
+
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                Transform child = parent.GetChild(i);
+                if (child.name == name)
+                {
+                    return child;
+                }
+
+                Transform result = child.FindDeep(name);
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+
+            return null;
         }
     }
 }

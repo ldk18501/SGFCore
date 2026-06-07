@@ -85,6 +85,7 @@ public partial class MainMenuForm : UIFormBase
 2. 右键 `SGFCore/UI Binding/Add Private`，选择要绑定的组件类型。
 3. 在 `UIFormBase` Inspector 中点击 `生成绑定代码`。
 4. 等 Unity 编译完成后，点击 `绑定引用`。
+5. 点击 `校验` 检查重复字段名、命名不规范、目标为空、组件缺失等问题。
 
 生成文件默认放在 `Assets/Scripts/UIBindings`，可在 Inspector 的 `生成目录` 中调整。生成结果类似：
 
@@ -103,7 +104,17 @@ public partial class MainMenuForm
 - `Add Public`：生成 `public` 字段，少用，只适合需要外部显式访问的 UI。
 - `Add Header`：在生成代码中插入 `[Header]` 分组。
 - `Remove Selected`：从绑定记录中移除当前选中节点。
-- `Generate Binding Code` / `Bind References`：不打开 Inspector 时也能直接操作。
+- `Generate Binding Code` / `Bind References` / `Validate`：不打开 Inspector 时也能直接操作。
+- `Generate And Bind`：适合脚本已经生成过的 Prefab 快速刷新引用；首次生成仍建议等 Unity 编译后再绑定。
+
+批处理菜单：
+
+```text
+Tools/SGFCore/UI Binding/Validate All UI Prefabs
+Tools/SGFCore/UI Binding/Generate All Binding Code
+Tools/SGFCore/UI Binding/Bind All Prefab References
+Tools/SGFCore/UI Binding/Validate And Generate All
+```
 
 注意事项：
 

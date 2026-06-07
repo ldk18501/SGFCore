@@ -5,6 +5,9 @@ namespace GameFramework.Core
     [Serializable]
     public abstract class SaveDataBase
     {
+        public int SaveVersion = 1;
+        public string SaveModuleName = string.Empty;
+
         [NonSerialized] public bool IsAutoSaveEnabled = false;
         [NonSerialized] public float AutoSaveInterval = 60f;
         [NonSerialized] internal long AutoSaveTimerId = 0;
@@ -35,6 +38,14 @@ namespace GameFramework.Core
         /// 子类需要重写此方法，将 this 绑定给所有的 SaveDataNode 子节点。
         /// </summary>
         public virtual void OnBindContext()
+        {
+        }
+
+        public virtual void OnBeforeSave()
+        {
+        }
+
+        public virtual void OnAfterLoad()
         {
         }
     }
@@ -71,6 +82,90 @@ namespace GameFramework.Core
             {
                 Log.Warning("[Save] SaveDataNode 未绑定根节点，脏标记可能丢失！");
             }
+        }
+    }
+
+    public interface ISaveDataMigration<T> where T : new()
+    {
+        int TargetVersion { get; }
+        void Migrate(T data, int fromVersion);
+    }
+
+    public readonly struct SaveDataLoadedEvent
+    {
+        public readonly string Slot;
+        public readonly string SaveName;
+        public readonly string ModuleName;
+        public readonly int Version;
+
+        public SaveDataLoadedEvent(string slot, string saveName, string moduleName, int version)
+        {
+            Slot = slot;
+            SaveName = saveName;
+            ModuleName = moduleName;
+            Version = version;
+        }
+    }
+
+    public readonly struct SaveDataSavedEvent
+    {
+        public readonly string Slot;
+        public readonly string SaveName;
+        public readonly string ModuleName;
+        public readonly int Version;
+
+        public SaveDataSavedEvent(string slot, string saveName, string moduleName, int version)
+        {
+            Slot = slot;
+            SaveName = saveName;
+            ModuleName = moduleName;
+            Version = version;
+        }
+    }
+
+    public readonly struct SaveDataDirtyEvent
+    {
+        public readonly string Slot;
+        public readonly string SaveName;
+        public readonly string ModuleName;
+
+        public SaveDataDirtyEvent(string slot, string saveName, string moduleName)
+        {
+            Slot = slot;
+            SaveName = saveName;
+            ModuleName = moduleName;
+        }
+    }
+
+    public readonly struct SaveDataMigratedEvent
+    {
+        public readonly string Slot;
+        public readonly string SaveName;
+        public readonly int FromVersion;
+        public readonly int ToVersion;
+
+        public SaveDataMigratedEvent(string slot, string saveName, int fromVersion, int toVersion)
+        {
+            Slot = slot;
+            SaveName = saveName;
+            FromVersion = fromVersion;
+            ToVersion = toVersion;
+        }
+    }
+
+    public readonly struct SaveDataRecoveredEvent
+    {
+        public readonly string Slot;
+        public readonly string SaveName;
+        public readonly string BackupPath;
+        public readonly string CorruptPath;
+
+        public SaveDataRecoveredEvent(string slot, string saveName, string backupPath, string corruptPath)
+        {
+            Slot = slot;
+            SaveName = saveName;
+            BackupPath = backupPath;
+            CorruptPath = corruptPath;
         }
     }
 }

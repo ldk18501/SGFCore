@@ -1,23 +1,94 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
 
 namespace GameFramework.Core
 {
+    public enum HttpErrorType
+    {
+        None,
+        Network,
+        Timeout,
+        Server,
+        Deserialize,
+        Canceled,
+        Unknown
+    }
+
+    public sealed class HttpRequestOptions
+    {
+        public int Timeout = -1;
+        public int RetryCount = -1;
+        public float RetryDelay = -1f;
+        public readonly Dictionary<string, string> Headers = new Dictionary<string, string>();
+    }
+
+    public readonly struct HttpResult<T>
+    {
+        public readonly bool Success;
+        public readonly long StatusCode;
+        public readonly string Url;
+        public readonly string RawText;
+        public readonly string Error;
+        public readonly HttpErrorType ErrorType;
+        public readonly T Data;
+
+        private HttpResult(bool success, long statusCode, string url, string rawText, string error, HttpErrorType errorType, T data)
+        {
+            Success = success;
+            StatusCode = statusCode;
+            Url = url;
+            RawText = rawText;
+            Error = error;
+            ErrorType = errorType;
+            Data = data;
+        }
+
+        public static HttpResult<T> Succeeded(long statusCode, string url, string rawText, T data)
+        {
+            return new HttpResult<T>(true, statusCode, url, rawText, null, HttpErrorType.None, data);
+        }
+
+        public static HttpResult<T> Failed(long statusCode, string url, string rawText, string error, HttpErrorType errorType)
+        {
+            return new HttpResult<T>(false, statusCode, url, rawText, error, errorType, default);
+        }
+    }
+
+    public readonly struct HttpRequestCompletedEvent
+    {
+        public readonly string Url;
+        public readonly string Method;
+        public readonly bool Success;
+        public readonly long StatusCode;
+        public readonly HttpErrorType ErrorType;
+
+        public HttpRequestCompletedEvent(string url, string method, bool success, long statusCode, HttpErrorType errorType)
+        {
+            Url = url;
+            Method = method;
+            Success = success;
+            StatusCode = statusCode;
+            ErrorType = errorType;
+        }
+    }
+
     /// <summary>
-    /// 全局 HTTP 网络请求模块
-    /// 完全基于 UniTask 和 UnityWebRequest，零额外依赖，极其轻量
+    /// 项目级 HTTP 模块：统一结果、错误类型、重试、取消、公共 Header 和超时策略。
     /// </summary>
     public class HttpModule : IFrameworkModule
     {
-        public int Priority => 90; 
+        private readonly Dictionary<string, string> _defaultHeaders = new Dictionary<string, string>();
 
-        // 全局默认超时时间
-        public int DefaultTimeout = 10; 
-        
-        // 可选：全局的 API 请求头 (比如鉴权 Token)
+        public int Priority => 90;
+        public int DefaultTimeout { get; set; } = 10;
+        public int DefaultRetryCount { get; set; } = 0;
+        public float DefaultRetryDelay { get; set; } = 0.25f;
+
         private string _authorizationToken = string.Empty;
 
         public void OnInit()
@@ -25,110 +96,210 @@ namespace GameFramework.Core
             Log.Module("Http", "网络请求模块初始化完成。");
         }
 
-        public void OnUpdate(float deltaTime, float unscaledDeltaTime) { }
-        public void OnDestroy() { }
-
-        /// <summary>
-        /// 设置全局 Token (登录后调用)
-        /// </summary>
-        public void SetAuthToken(string token)
+        public void OnUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            _authorizationToken = token;
         }
 
-        // ==========================================
-        // 核心 API：GET 请求
-        // ==========================================
-        
-        /// <summary>
-        /// 发送 GET 请求并自动反序列化为对象
-        /// </summary>
-        public async UniTask<T> GetAsync<T>(string url, int timeout = -1)
+        public void OnDestroy()
         {
-            // 使用 using 保证 UnityWebRequest 即使在异常时也能被彻底 Dispose，绝不漏内存！
-            using (var request = UnityWebRequest.Get(url))
+            _defaultHeaders.Clear();
+        }
+
+        public void SetAuthToken(string token)
+        {
+            _authorizationToken = token ?? string.Empty;
+        }
+
+        public void SetDefaultHeader(string key, string value)
+        {
+            if (string.IsNullOrWhiteSpace(key))
             {
-                SetupRequest(request, timeout);
+                return;
+            }
 
-                try
-                {
-                    // 神奇的 ToUniTask()，直接把繁琐的协程变成了优雅的 await
-                    await request.SendWebRequest().ToUniTask();
-
-                    if (request.result == UnityWebRequest.Result.Success)
-                    {
-                        string json = request.downloadHandler.text;
-                        return JsonUtility.FromJson<T>(json);
-                    }
-                    
-                    Log.Error($"[Http] GET 请求失败: {url}\nError: {request.error}");
-                    return default;
-                }
-                catch (Exception e)
-                {
-                    // 捕获网络断开、DNS 解析失败等异常
-                    Log.Error($"[Http] GET 发生异常: {url}\nException: {e.Message}");
-                    return default;
-                }
+            if (string.IsNullOrEmpty(value))
+            {
+                _defaultHeaders.Remove(key);
+            }
+            else
+            {
+                _defaultHeaders[key] = value;
             }
         }
 
-        // ==========================================
-        // 核心 API：POST 请求 (发 JSON)
-        // ==========================================
+        public void ClearDefaultHeaders()
+        {
+            _defaultHeaders.Clear();
+        }
 
-        /// <summary>
-        /// 发送 POST 请求 (将对象序列化为 JSON 提交)，并自动反序列化返回值
-        /// </summary>
+        public async UniTask<T> GetAsync<T>(string url, int timeout = -1)
+        {
+            HttpResult<T> result = await GetResultAsync<T>(url, new HttpRequestOptions { Timeout = timeout });
+            return result.Success ? result.Data : default;
+        }
+
+        public async UniTask<HttpResult<T>> GetResultAsync<T>(
+            string url,
+            HttpRequestOptions options = null,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            return await SendAsync<T>(() => UnityWebRequest.Get(url), "GET", url, options, cancellationToken);
+        }
+
         public async UniTask<TResponse> PostJsonAsync<TRequest, TResponse>(string url, TRequest postData, int timeout = -1)
+        {
+            HttpResult<TResponse> result = await PostJsonResultAsync<TRequest, TResponse>(
+                url,
+                postData,
+                new HttpRequestOptions { Timeout = timeout });
+            return result.Success ? result.Data : default;
+        }
+
+        public async UniTask<HttpResult<TResponse>> PostJsonResultAsync<TRequest, TResponse>(
+            string url,
+            TRequest postData,
+            HttpRequestOptions options = null,
+            CancellationToken cancellationToken = default(CancellationToken))
         {
             string jsonBody = JsonUtility.ToJson(postData);
             byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonBody);
-
-            using (var request = new UnityWebRequest(url, "POST"))
+            return await SendAsync<TResponse>(() =>
             {
-                // 设置上传的 Body
+                UnityWebRequest request = new UnityWebRequest(url, UnityWebRequest.kHttpVerbPOST);
                 request.uploadHandler = new UploadHandlerRaw(bodyRaw);
                 request.downloadHandler = new DownloadHandlerBuffer();
-                
-                // 必须设置请求头，告诉服务器这是 JSON
                 request.SetRequestHeader("Content-Type", "application/json");
-                SetupRequest(request, timeout);
+                return request;
+            }, "POST", url, options, cancellationToken);
+        }
 
-                try
+        public async UniTask<HttpResult<string>> GetTextAsync(
+            string url,
+            HttpRequestOptions options = null,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            return await SendAsync<string>(() => UnityWebRequest.Get(url), "GET", url, options, cancellationToken, text => text);
+        }
+
+        private async UniTask<HttpResult<T>> SendAsync<T>(
+            Func<UnityWebRequest> requestFactory,
+            string method,
+            string url,
+            HttpRequestOptions options,
+            CancellationToken cancellationToken,
+            Func<string, T> customParser = null)
+        {
+            options ??= new HttpRequestOptions();
+            int retryCount = options.RetryCount >= 0 ? options.RetryCount : DefaultRetryCount;
+            float retryDelay = options.RetryDelay >= 0f ? options.RetryDelay : DefaultRetryDelay;
+            HttpResult<T> lastResult = default;
+
+            for (int attempt = 0; attempt <= retryCount; attempt++)
+            {
+                using (UnityWebRequest request = requestFactory.Invoke())
                 {
-                    await request.SendWebRequest().ToUniTask();
+                    SetupRequest(request, options);
 
-                    if (request.result == UnityWebRequest.Result.Success)
+                    try
                     {
-                        string responseJson = request.downloadHandler.text;
-                        return JsonUtility.FromJson<TResponse>(responseJson);
+                        await request.SendWebRequest().ToUniTask(cancellationToken: cancellationToken);
+                        lastResult = BuildResult(request, url, customParser);
                     }
+                    catch (OperationCanceledException)
+                    {
+                        lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), "请求已取消。", HttpErrorType.Canceled);
+                    }
+                    catch (Exception e)
+                    {
+                        lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), e.Message, Classify(request));
+                    }
+                }
 
-                    Log.Error($"[Http] POST 请求失败: {url}\nBody: {jsonBody}\nError: {request.error}");
-                    return default;
-                }
-                catch (Exception e)
+                if (lastResult.Success || lastResult.ErrorType == HttpErrorType.Canceled || attempt >= retryCount)
                 {
-                    Log.Error($"[Http] POST 发生异常: {url}\nException: {e.Message}");
-                    return default;
+                    Broadcast(method, lastResult);
+                    return lastResult;
                 }
+
+                if (retryDelay > 0f)
+                {
+                    await UniTask.Delay(TimeSpan.FromSeconds(retryDelay), ignoreTimeScale: true, cancellationToken: cancellationToken);
+                }
+            }
+
+            Broadcast(method, lastResult);
+            return lastResult;
+        }
+
+        private HttpResult<T> BuildResult<T>(UnityWebRequest request, string url, Func<string, T> customParser)
+        {
+            string rawText = ReadText(request);
+            if (request.result != UnityWebRequest.Result.Success)
+            {
+                return HttpResult<T>.Failed(request.responseCode, url, rawText, request.error, Classify(request));
+            }
+
+            try
+            {
+                T data = customParser != null ? customParser(rawText) : JsonUtility.FromJson<T>(rawText);
+                return HttpResult<T>.Succeeded(request.responseCode, url, rawText, data);
+            }
+            catch (Exception e)
+            {
+                return HttpResult<T>.Failed(request.responseCode, url, rawText, e.Message, HttpErrorType.Deserialize);
             }
         }
 
-        // ==========================================
-        // 内部辅助
-        // ==========================================
-
-        private void SetupRequest(UnityWebRequest request, int timeout)
+        private void SetupRequest(UnityWebRequest request, HttpRequestOptions options)
         {
-            request.timeout = timeout > 0 ? timeout : DefaultTimeout;
+            request.timeout = options.Timeout > 0 ? options.Timeout : DefaultTimeout;
 
-            // 如果有全局 Token，自动挂载到请求头
+            foreach (KeyValuePair<string, string> pair in _defaultHeaders)
+            {
+                request.SetRequestHeader(pair.Key, pair.Value);
+            }
+
+            foreach (KeyValuePair<string, string> pair in options.Headers)
+            {
+                request.SetRequestHeader(pair.Key, pair.Value);
+            }
+
             if (!string.IsNullOrEmpty(_authorizationToken))
             {
                 request.SetRequestHeader("Authorization", $"Bearer {_authorizationToken}");
             }
+        }
+
+        private static string ReadText(UnityWebRequest request)
+        {
+            return request.downloadHandler != null ? request.downloadHandler.text : string.Empty;
+        }
+
+        private static HttpErrorType Classify(UnityWebRequest request)
+        {
+            if (request.result == UnityWebRequest.Result.ConnectionError)
+            {
+                return request.error != null && request.error.IndexOf("timed out", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? HttpErrorType.Timeout
+                    : HttpErrorType.Network;
+            }
+
+            if (request.result == UnityWebRequest.Result.ProtocolError)
+            {
+                return HttpErrorType.Server;
+            }
+
+            return HttpErrorType.Unknown;
+        }
+
+        private void Broadcast<T>(string method, HttpResult<T> result)
+        {
+            GameApp.Event?.Broadcast(new HttpRequestCompletedEvent(
+                result.Url,
+                method,
+                result.Success,
+                result.StatusCode,
+                result.ErrorType));
         }
     }
 }

@@ -47,11 +47,27 @@ namespace GameFramework.Core.UI.Editor
             UIBindingCodeGenerator.Generate(form);
         }
 
-        [MenuItem("GameObject/SGFCore/UI Binding/Bind References", false, -100013)]
+        [MenuItem("GameObject/SGFCore/UI Binding/Validate", false, -100013)]
+        private static void ValidateBinding()
+        {
+            UIFormBase form = UIBindingEditorUtility.FindActiveForm();
+            UIBindingValidator.Validate(form);
+        }
+
+        [MenuItem("GameObject/SGFCore/UI Binding/Bind References", false, -100012)]
         private static void BindReferences()
         {
             UIFormBase form = UIBindingEditorUtility.FindActiveForm();
             UIBindingReferenceBinder.Bind(form);
+        }
+
+        [MenuItem("GameObject/SGFCore/UI Binding/Generate And Bind", false, -100011)]
+        private static void GenerateAndBind()
+        {
+            UIFormBase form = UIBindingEditorUtility.FindActiveForm();
+            UIBindingCodeGenerator.Generate(form);
+            UIBindingReferenceBinder.Bind(form);
+            UIBindingValidator.Validate(form);
         }
 
         [MenuItem("GameObject/SGFCore/UI Binding/Add Private", true)]
@@ -60,7 +76,9 @@ namespace GameFramework.Core.UI.Editor
         [MenuItem("GameObject/SGFCore/UI Binding/Add Header", true)]
         [MenuItem("GameObject/SGFCore/UI Binding/Remove Selected", true)]
         [MenuItem("GameObject/SGFCore/UI Binding/Generate Binding Code", true)]
+        [MenuItem("GameObject/SGFCore/UI Binding/Validate", true)]
         [MenuItem("GameObject/SGFCore/UI Binding/Bind References", true)]
+        [MenuItem("GameObject/SGFCore/UI Binding/Generate And Bind", true)]
         private static bool ValidateBindingMenu()
         {
             return UIBindingEditorUtility.FindActiveForm() != null;

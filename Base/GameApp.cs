@@ -29,6 +29,9 @@ namespace GameFramework.Core
         private static TimerModule _timer;
         public static TimerModule Timer => _timer ??= FrameworkEntry.Instance.GetModule<TimerModule>();
 
+        private static TimeModule _time;
+        public static TimeModule Time => _time ??= FrameworkEntry.Instance.GetModule<TimeModule>();
+
         private static PoolModule _pool;
         public static PoolModule Pool => _pool ??= FrameworkEntry.Instance.GetModule<PoolModule>();
 
@@ -37,6 +40,9 @@ namespace GameFramework.Core
 
         private static RedPointModule _redPoint;
         public static RedPointModule RedPoint => _redPoint ??= FrameworkEntry.Instance.GetModule<RedPointModule>();
+
+        private static GuideModule _guide;
+        public static GuideModule Guide => _guide ??= FrameworkEntry.Instance.GetModule<GuideModule>();
 
         private static ConfigModule _config;
         public static ConfigModule Config => _config ??= FrameworkEntry.Instance.GetModule<ConfigModule>();

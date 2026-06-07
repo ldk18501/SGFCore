@@ -48,6 +48,11 @@ namespace GameFramework.Core.UI.Editor
                     {
                         UIBindingReferenceBinder.Bind(form);
                     }
+
+                    if (GUILayout.Button("校验", GUILayout.Height(28)))
+                    {
+                        UIBindingValidator.Validate(form);
+                    }
                 }
 
                 using (new EditorGUILayout.HorizontalScope())

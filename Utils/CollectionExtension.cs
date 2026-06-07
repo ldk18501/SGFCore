@@ -30,5 +30,22 @@ namespace GameFramework.Core.Utility
             if (list == null || list.Count == 0) return default;
             return list[Random.Range(0, list.Count)];
         }
+
+        public static bool IsNullOrEmpty<T>(this ICollection<T> collection)
+        {
+            return collection == null || collection.Count == 0;
+        }
+
+        public static bool TryGet<T>(this IList<T> list, int index, out T value)
+        {
+            if (list != null && index >= 0 && index < list.Count)
+            {
+                value = list[index];
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
     }
 }

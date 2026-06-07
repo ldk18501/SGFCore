@@ -56,10 +56,22 @@ namespace GameFramework.Core.Utility
             return UnixEpoch.AddSeconds(timestamp).ToLocalTime();
         }
 
+        /// <summary> Unix 时间戳 (秒) 转 UTC DateTime </summary>
+        public static DateTime TimestampSecondsToUtcDateTime(long timestamp)
+        {
+            return UnixEpoch.AddSeconds(timestamp);
+        }
+
         /// <summary> Unix 时间戳 (毫秒) 转本地 DateTime </summary>
         public static DateTime TimestampMillisecondsToDateTime(long timestamp)
         {
             return UnixEpoch.AddMilliseconds(timestamp).ToLocalTime();
+        }
+
+        /// <summary> Unix 时间戳 (毫秒) 转 UTC DateTime </summary>
+        public static DateTime TimestampMillisecondsToUtcDateTime(long timestamp)
+        {
+            return UnixEpoch.AddMilliseconds(timestamp);
         }
 
         // ==========================================

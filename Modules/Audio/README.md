@@ -1,28 +1,38 @@
 # Audio 模块使用说明
 
-Audio 模块管理 BGM、2D/3D SFX、跟随音效、单例防重、随机变调和音量。
+Audio 模块管理 BGM、2D/3D SFX、跟随音效、单例防重、随机变调、音量分组、静音、暂停恢复、BGM 淡入淡出和音效句柄生命周期。
 
-## 播放 BGM
+## BGM
 
 ```csharp
-await GameApp.Audio.PlayBGMAsync("Audio/BGM_Main");
-GameApp.Audio.StopBGM();
+await GameApp.Audio.PlayBGMAsync("Audio/BGM_Main", fadeDuration: 0.5f);
+await GameApp.Audio.StopBGMAsync(fadeDuration: 0.3f);
 ```
 
-切换 BGM 时模块会释放旧的 AudioClip。
+切换 BGM 时模块会释放旧的 `AudioClip`。
 
-## 播放 2D 音效
+## 音效句柄
 
 ```csharp
-long id = GameApp.Audio.PlaySFX(
+AudioHandle handle = GameApp.Audio.PlaySFXEx(
     "Audio/SFX_Click",
+    AudioGroup.UI,
     isSingleton: true,
     pitchRange: 0.05f);
+
+GameApp.Audio.PauseAudio(handle);
+GameApp.Audio.ResumeAudio(handle);
+GameApp.Audio.StopAudio(handle);
 ```
 
-`isSingleton` 适合按钮点击、连续升级等高频音效，避免同一音效叠太多。
+旧接口仍然可用：
 
-## 播放 3D 音效
+```csharp
+long id = GameApp.Audio.PlaySFX("Audio/SFX_Click");
+GameApp.Audio.StopAudio(id);
+```
+
+## 3D 和跟随音效
 
 ```csharp
 GameApp.Audio.PlaySFX(
@@ -31,32 +41,36 @@ GameApp.Audio.PlaySFX(
     position: transform.position,
     minDistance: 1f,
     maxDistance: 30f);
+
+long engineId = GameApp.Audio.PlaySFX("Audio/SFX_EngineLoop", car.transform, loop: true);
 ```
 
-## 跟随目标的 3D 音效
+循环音效需要手动停止。
+
+## 分组音量、静音、暂停
 
 ```csharp
-long engineId = GameApp.Audio.PlaySFX(
-    "Audio/SFX_EngineLoop",
-    followTarget: car.transform,
-    loop: true);
+GameApp.Audio.SetMasterVolume(0.8f);
+GameApp.Audio.SetGroupVolume(AudioGroup.UI, 0.7f);
+GameApp.Audio.SetMuted(AudioGroup.SFX, true);
 
-GameApp.Audio.StopAudio(engineId);
+GameApp.Audio.PauseGroup(AudioGroup.SFX);
+GameApp.Audio.ResumeGroup(AudioGroup.SFX);
+GameApp.Audio.PauseAll();
+GameApp.Audio.ResumeAll();
 ```
 
-## 音量和停止
+默认分组：
+
+```text
+Master, BGM, SFX, UI, Voice, Ambient
+```
+
+## 事件
 
 ```csharp
-GameApp.Audio.SetBGMVolume(0.8f);
-GameApp.Audio.SetSFXVolume(0.6f);
-
-GameApp.Audio.StopAudio(id);
-GameApp.Audio.StopAllSFX();
-GameApp.Audio.StopAll();
+AudioVolumeChangedEvent
+AudioPlaybackEvent
 ```
 
-## 注意事项
-
-- AudioClip 通过 `ResourceModule` 加载，播放完会自动释放。
-- 循环音效需要手动 `StopAudio`。
-- 3D 音效的衰减参数按项目镜头距离调校。
+这些事件适合设置面板、调试面板或埋点监听。

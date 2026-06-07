@@ -36,6 +36,7 @@ namespace GameFramework.Core
             // 6. 启动时间与池化基建
             RegisterModule(new PoolModule());
             RegisterModule(new TimerModule());
+            RegisterModule(new TimeModule());
 
             // 7. 启动表现层核心：资源、场景、配置、多语言、UI、音效
             RegisterModule(new ResourceModule());
@@ -44,6 +45,7 @@ namespace GameFramework.Core
             RegisterModule(new LocalizationModule());
             RegisterModule(new UIModule());
             RegisterModule(new RedPointModule());
+            RegisterModule(new GuideModule());
             RegisterModule(new AudioModule());
 
             // 8. 启动 FSM 与游戏主流程模块

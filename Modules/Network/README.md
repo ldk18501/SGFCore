@@ -1,56 +1,80 @@
 # Network 模块使用说明
 
-Network 模块当前提供 `HttpModule`，基于 `UnityWebRequest` 和 `UniTask` 封装 JSON GET/POST。
+Network 模块当前提供 `HttpModule`，基于 `UnityWebRequest` 和 `UniTask` 封装 JSON GET/POST，支持统一结果、错误类型、重试、取消、公共 Header 和超时策略。
 
-## 设置 Token
+## 公共 Header 和 Token
 
 ```csharp
 GameApp.Http.SetAuthToken(loginToken);
-```
-
-设置后会自动添加：
-
-```text
-Authorization: Bearer {token}
+GameApp.Http.SetDefaultHeader("X-Client-Version", Application.version);
 ```
 
 ## GET 请求
 
 ```csharp
-[Serializable]
-public class RankResponse
+HttpResult<RankResponse> result = await GameApp.Http.GetResultAsync<RankResponse>(url);
+if (!result.Success)
 {
-    public int code;
-    public string message;
+    Log.Error(result.Error);
+    return;
 }
 
-RankResponse result = await GameApp.Http.GetAsync<RankResponse>(
-    "https://example.com/rank");
+RankResponse data = result.Data;
+```
+
+旧接口仍然可用，但失败时只返回 `default`：
+
+```csharp
+RankResponse data = await GameApp.Http.GetAsync<RankResponse>(url);
 ```
 
 ## POST JSON
 
 ```csharp
-[Serializable]
-public class SubmitScoreRequest
-{
-    public int score;
-}
-
-RankResponse result = await GameApp.Http.PostJsonAsync<SubmitScoreRequest, RankResponse>(
-    "https://example.com/score",
-    new SubmitScoreRequest { score = 100 });
+HttpResult<RankResponse> result =
+    await GameApp.Http.PostJsonResultAsync<SubmitScoreRequest, RankResponse>(
+        url,
+        new SubmitScoreRequest { score = 100 });
 ```
 
-## 超时
+## 超时、重试、取消
 
 ```csharp
-GameApp.Http.DefaultTimeout = 10;
-var result = await GameApp.Http.GetAsync<RankResponse>(url, timeout: 5);
+CancellationTokenSource cts = new CancellationTokenSource();
+
+HttpRequestOptions options = new HttpRequestOptions
+{
+    Timeout = 5,
+    RetryCount = 2,
+    RetryDelay = 0.3f
+};
+options.Headers["X-Request-Id"] = requestId;
+
+HttpResult<RankResponse> result = await GameApp.Http.GetResultAsync<RankResponse>(
+    url,
+    options,
+    cts.Token);
+```
+
+## 错误类型
+
+```csharp
+HttpErrorType.None
+HttpErrorType.Network
+HttpErrorType.Timeout
+HttpErrorType.Server
+HttpErrorType.Deserialize
+HttpErrorType.Canceled
+HttpErrorType.Unknown
+```
+
+请求完成后会广播：
+
+```csharp
+HttpRequestCompletedEvent
 ```
 
 ## 注意事项
 
 - 当前使用 `JsonUtility`，不适合复杂 JSON、字典或顶层数组。
-- 网络错误会记录日志并返回 `default`。
-- 更复杂的重试、签名、错误码分发可以在 HttpModule 上继续扩展。
+- 如果后端返回统一 `code/message/data`，建议在业务层定义对应响应结构，不要让 HttpModule 绑定具体协议。

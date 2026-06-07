@@ -38,6 +38,7 @@ namespace GameFramework.Core.UI.Editor
 
             UIBindingField[] fields = form.GetBindingFields();
             string scriptPath = GetGeneratedScriptPath(form);
+            UIBindingValidator.Validate(form, true);
 
             if (fields == null || fields.Length == 0)
             {
