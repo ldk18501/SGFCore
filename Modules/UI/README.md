@@ -121,6 +121,12 @@ public partial class MainMenuForm
 - `UIHoldRepeatButton`：长按重复触发，适合加减数量、连续升级。
 - `UINumberCounter`：数字滚动显示，支持 `Text` 和 `TMP_Text`，可输出原始数字、单位缩写或自定义格式。
 - `UIStepProgressBar`：多段式进度条，适合奖励节点、章节进度、分段血条。
+- `UIVirtualList`：固定尺寸 Item 的虚拟滚动列表，适合背包、任务、商店、排行。
+- `UINetImage`：网络图片组件，支持占位图、失败图、取消请求和静态缓存。
+- `UIModalOverlay`：弹窗遮罩点击行为。
+- `UIToast`：轻量 Toast 展示器。
+- `UILoadingOverlay`：通用 Loading 遮罩。
+- `UIConfirmDialog`：通用确认弹窗绑定脚本。
 
 ### 按钮音效
 
@@ -156,3 +162,124 @@ counter.SetValueImmediately(0);
 - `Clamp To Parent Rect`：目标离开屏幕时夹到父节点边缘。
 - `Parent Padding`：夹边时保留安全边距。
 - `Interactable When Visible` / `Blocks Raycasts When Hidden`：同步控制 `CanvasGroup` 的交互状态。
+
+## 虚拟滚动列表
+
+`UIVirtualList` 用于大量固定尺寸 Item。它不魔改 `ScrollRect`，只要求：
+
+- 节点上有 `ScrollRect`。
+- `ScrollRect.content` 指向 Content。
+- Content 下有一个 Item 模板。
+- Item 高宽固定，列表通过回调刷新内容。
+
+代码接入：
+
+```csharp
+[SerializeField] private UIVirtualList _list;
+
+private readonly List<ItemData> _items = new List<ItemData>();
+
+private void Awake()
+{
+    _list.SetItemRenderer(RefreshItem);
+}
+
+private void RefreshList()
+{
+    _list.SetDataCount(_items.Count, resetPosition: true);
+}
+
+private void RefreshItem(int index, GameObject item)
+{
+    ItemView view = item.GetComponent<ItemView>();
+    view.Refresh(_items[index]);
+}
+```
+
+Inspector 里常用配置：
+
+- `Layout Mode`：`Vertical`、`Horizontal`、`VerticalGrid`。
+- `Item Size`：Item 固定尺寸。
+- `Spacing` / `Padding`：间距和边距。
+- `Constraint Count`：`VerticalGrid` 的列数。
+- `Extra Buffer`：视口外额外保留的缓存行，减少快速滑动时的闪烁。
+
+如果不想写代码回调，也可以在 `On Refresh Item` 里用 Inspector 绑定事件。
+
+## 网络图片
+
+`UINetImage` 挂在带 `Image` 的节点上：
+
+```csharp
+_avatarImage.Load(player.AvatarUrl);
+```
+
+支持：
+
+- `Placeholder Sprite`：请求中显示。
+- `Error Sprite`：失败时显示。
+- `Use Cache`：相同 URL 复用已下载 Sprite。
+- `Cancel On Disable`：节点隐藏时取消未完成请求。
+- `Set Native Size`：下载完成后按图片原始尺寸设置 UI。
+
+缓存清理：
+
+```csharp
+UINetImage.RemoveCache(url);
+UINetImage.ClearCache();
+```
+
+## 弹窗体验组件
+
+### 遮罩点击关闭
+
+给弹窗背景遮罩挂 `UIModalOverlay`。遮罩节点需要有可接收射线的 `Graphic`，例如 `Image` 或 `UIRaycastArea`；如果节点没有 Graphic，组件 Reset 时会自动补一个无绘制开销的 `UIRaycastArea`。点击后可选择：
+
+- `None`：只派发事件。
+- `SetTargetInactive`：隐藏目标对象。
+- `DestroyTarget`：销毁目标对象。
+- `CloseUIForm`：调用 `GameApp.UI.CloseUI` 关闭所在 `UIFormBase`。
+
+### Toast
+
+在某个常驻 UI 节点上挂 `UIToast`，拖好 `CanvasGroup` 和文本引用：
+
+```csharp
+UIToast.ShowGlobal("金币不足");
+UIToast.Instance.Show("升级成功", 1.2f);
+UIToast.Instance.ShowImmediately("网络断开");
+```
+
+`Show` 会排队显示，`ShowImmediately` 会清空队列并立刻显示新内容。
+
+### Loading
+
+在 Loading 遮罩 Prefab 上挂 `UILoadingOverlay`：
+
+```csharp
+UILoadingOverlay.ShowGlobal("加载中...");
+UILoadingOverlay.Instance.SetProgress(0.5f);
+UILoadingOverlay.HideGlobal();
+```
+
+默认支持引用计数：多个流程同时 `Show` 时，需要对应次数 `Hide` 后才会真正隐藏。需要强制清理时调用：
+
+```csharp
+UILoadingOverlay.Instance.ForceHide();
+```
+
+### ConfirmDialog
+
+确认弹窗 Prefab 上挂 `UIConfirmDialog`，拖好标题、正文、确认/取消/关闭按钮：
+
+```csharp
+_confirmDialog.Configure(
+    "退出关卡",
+    "当前进度尚未保存，确定退出吗？",
+    onConfirm: ExitLevel,
+    onCancel: null,
+    confirmText: "退出",
+    cancelText: "继续");
+```
+
+按钮也可以直接在 Inspector 的 `On Confirm` / `On Cancel` 里绑定逻辑。关闭行为由 `Close Action` 控制，可隐藏自身、销毁对象或关闭所在 UIForm。
