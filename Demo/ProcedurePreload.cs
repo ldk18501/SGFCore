@@ -9,7 +9,7 @@ namespace GameFramework.Core.Demo
     /// 流程状态：数据预加载
     /// 负责加载配置表、玩家存档、以及一些全局常驻预制体
     /// </summary>
-    public class ProcedurePreload : FsmState<GameDemoEntry>
+    public class ProcedurePreload : ProcedureBase
     {
         public override async void OnEnter()
         {
@@ -34,13 +34,13 @@ namespace GameFramework.Core.Demo
 
             // 3. 读取玩家本地存档
             var save = GameApp.Save.LoadData<SimulationSaveData>("MainSave");
-            // 把它存到 FSM 黑板里，或者丢给全局的 DataManager
-            _fsm.SetData("CurrentSave", save);
+            // 把它存到 Procedure 黑板里，或者丢给全局的 DataManager
+            SetData("CurrentSave", save);
 
             // 4. 预加载完毕，准备进入游戏！
             // GameApp.UI.CloseUI(loadingPanelId); // 关闭 Loading 界面的示例
             
-            ChangeState<ProcedureMainMenu>();
+            ChangeProcedure<ProcedureMainMenu>();
         }
     }
 }

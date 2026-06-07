@@ -1,7 +1,6 @@
 ﻿using UnityEngine;
 using System;
 using System.Collections.Generic;
-using UnityEngine;
 
 namespace GameFramework.Core
 {
@@ -38,15 +37,18 @@ namespace GameFramework.Core
             RegisterModule(new PoolModule());
             RegisterModule(new TimerModule());
 
-            // 7. 启动表现层核心：资源、UI、音效、配置表
+            // 7. 启动表现层核心：资源、场景、配置、多语言、UI、音效
             RegisterModule(new ResourceModule());
+            RegisterModule(new SceneModule());
+            RegisterModule(new ConfigModule());
+            RegisterModule(new LocalizationModule());
             RegisterModule(new UIModule());
             RegisterModule(new RedPointModule());
             RegisterModule(new AudioModule());
-            RegisterModule(new ConfigModule());
 
-            // 8. 启动 FSM 模块
+            // 8. 启动 FSM 与游戏主流程模块
             RegisterModule(new FsmModule());
+            RegisterModule(new ProcedureModule());
 
             Log.Info("<color=#00FF00>[GameEntry] 框架基础核心模块组装完毕！</color>");
         }

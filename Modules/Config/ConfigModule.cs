@@ -1,111 +1,283 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 
 namespace GameFramework.Core
 {
     /// <summary>
-    /// 全局配置表管理模块
-    /// 负责统一下载、读取、解密二进制配置表，并分发给对应的解析类
+    /// 全局配置表管理模块，负责加载二进制配置并分发给生成代码的 Load(byte[])。
     /// </summary>
     public class ConfigModule : IFrameworkModule
     {
-        // 优先级排在 ResourceModule (40) 之后
-        public int Priority => 45; 
+        public int Priority => 45;
 
-        // 注册表：配置文件名 -> 对应的 Load 方法
-        private readonly Dictionary<string, Action<byte[]>> _loadMap = new Dictionary<string, Action<byte[]>>();
+        private readonly Dictionary<string, ConfigRegistration> _loadMap =
+            new Dictionary<string, ConfigRegistration>();
+
+        private readonly HashSet<string> _loadedConfigs = new HashSet<string>();
+
+        public int RegisteredCount => _loadMap.Count;
+        public int LoadedCount => _loadedConfigs.Count;
 
         public void OnInit()
         {
             Log.Module("Config", "配置表模块初始化完成。");
         }
 
-        public void OnUpdate(float deltaTime, float unscaledDeltaTime) { }
-        
-        public void OnDestroy() 
+        public void OnUpdate(float deltaTime, float unscaledDeltaTime)
+        {
+        }
+
+        public void OnDestroy()
         {
             _loadMap.Clear();
+            _loadedConfigs.Clear();
         }
 
-        /// <summary>
-        /// 注册配置表的解析委托（通常在游戏启动时调用）
-        /// </summary>
         public void RegisterConfig(string configName, Action<byte[]> loadMethod)
         {
-            if (!_loadMap.ContainsKey(configName))
+            TryRegisterConfig(configName, loadMethod, replaceExisting: true);
+        }
+
+        public bool TryRegisterConfig(string configName, Action<byte[]> loadMethod, bool replaceExisting = false)
+        {
+            if (string.IsNullOrWhiteSpace(configName))
             {
-                _loadMap.Add(configName, loadMethod);
+                Log.Error("[Config] 注册失败：配置名为空。");
+                return false;
+            }
+
+            if (loadMethod == null)
+            {
+                Log.Error($"[Config] 注册失败：{configName} 的解析方法为空。");
+                return false;
+            }
+
+            if (_loadMap.ContainsKey(configName) && !replaceExisting)
+            {
+                Log.Warning($"[Config] 配置表已经注册，已忽略: {configName}");
+                return false;
+            }
+
+            _loadMap[configName] = new ConfigRegistration(configName, loadMethod);
+            return true;
+        }
+
+        public bool IsRegistered(string configName)
+        {
+            return !string.IsNullOrEmpty(configName) && _loadMap.ContainsKey(configName);
+        }
+
+        public bool IsLoaded(string configName)
+        {
+            return !string.IsNullOrEmpty(configName) && _loadedConfigs.Contains(configName);
+        }
+
+        public async UniTask LoadConfigAsync(string address, string configName)
+        {
+            await TryLoadConfigAsync(address, configName);
+        }
+
+        public async UniTask<ConfigLoadResult> TryLoadConfigAsync(
+            string address,
+            string configName,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (string.IsNullOrWhiteSpace(address))
+            {
+                return ConfigLoadResult.Failed(configName, address, "资源地址为空。");
+            }
+
+            if (string.IsNullOrWhiteSpace(configName))
+            {
+                return ConfigLoadResult.Failed(configName, address, "配置名为空。");
+            }
+
+            if (!_loadMap.TryGetValue(configName, out ConfigRegistration registration))
+            {
+                string error = $"未注册该表的解析方法: {configName}";
+                Log.Error($"[Config] {error}");
+                return ConfigLoadResult.Failed(configName, address, error);
+            }
+
+            TextAsset textAsset = null;
+            try
+            {
+                textAsset = await GameApp.Res.LoadAssetAsync<TextAsset>(address, cancellationToken);
+                if (textAsset == null)
+                {
+                    string error = $"无法加载配置表资源: {address}";
+                    Log.Error($"[Config] {error}");
+                    return ConfigLoadResult.Failed(configName, address, error);
+                }
+
+                registration.LoadMethod.Invoke(textAsset.bytes);
+                _loadedConfigs.Add(configName);
+
+                Log.Info($"[Config] 配置表加载并解析成功: {configName}");
+                GameApp.Event?.Broadcast(new ConfigLoadedEvent(configName, address));
+                return ConfigLoadResult.Succeeded(configName, address);
+            }
+            catch (OperationCanceledException)
+            {
+                return ConfigLoadResult.Failed(configName, address, "加载被取消。");
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[Config] 配置表加载失败: {configName}, 原因: {e.Message}");
+                return ConfigLoadResult.Failed(configName, address, e.Message);
+            }
+            finally
+            {
+                if (textAsset != null)
+                {
+                    GameApp.Res.ReleaseAsset(textAsset);
+                }
             }
         }
 
-        /// <summary>
-        /// 异步加载单个配置文件
-        /// </summary>
-        /// <param name="address">Addressables 资源路径 (例如 "Assets/Configs/ItemValueConf.bytes")</param>
-        /// <param name="configName">注册时的表名 (例如 "ItemValueConf")</param>
-        public async UniTask LoadConfigAsync(string address, string configName)
+        public async UniTask LoadConfigsBatchAsync(Dictionary<string, string> configAddressMap)
         {
-            if (!_loadMap.TryGetValue(configName, out var loadAction))
+            await TryLoadConfigsBatchAsync(configAddressMap);
+        }
+
+        public async UniTask<ConfigBatchLoadResult> TryLoadConfigsBatchAsync(
+            Dictionary<string, string> configAddressMap,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (configAddressMap == null || configAddressMap.Count == 0)
             {
-                Log.Error($"[Config] 未注册该表的解析方法: {configName}");
-                return;
+                return new ConfigBatchLoadResult(new ConfigLoadResult[0]);
             }
 
-            // 1. 通过资源模块加载 TextAsset (二进制文件在 Unity 中通常作为 TextAsset 加载)
-            TextAsset textAsset = await GameApp.Res.LoadAssetAsync<TextAsset>(address);
-            
-            if (textAsset != null)
+            List<UniTask<ConfigLoadResult>> tasks = new List<UniTask<ConfigLoadResult>>(configAddressMap.Count);
+            foreach (var pair in configAddressMap)
             {
-                // 2. 将字节数组交给具体的生成的 Config 类去解析
-                loadAction.Invoke(textAsset.bytes);
-                
-                // 3. 【极其重要】解析完成后，立刻释放 TextAsset，否则这些 byte[] 会永远残留在内存中！
-                GameApp.Res.ReleaseAsset(textAsset);
-                
-                Log.Info($"[Config] 配置表加载并解析成功: {configName}");
+                tasks.Add(TryLoadConfigAsync(pair.Value, pair.Key, cancellationToken));
+            }
+
+            ConfigLoadResult[] results = await UniTask.WhenAll(tasks);
+            ConfigBatchLoadResult batchResult = new ConfigBatchLoadResult(results);
+
+            if (batchResult.Success)
+            {
+                Log.Module("Config", $"成功批量加载 {batchResult.TotalCount} 张配置表。");
             }
             else
             {
-                Log.Error($"[Config] 无法加载配置表资源: {address}");
-            }
-        }
-
-        /// <summary>
-        /// 批量异步加载配置表 (并行加载，速度极快)
-        /// </summary>
-        public async UniTask LoadConfigsBatchAsync(Dictionary<string, string> configAddressMap)
-        {
-            List<UniTask> tasks = new List<UniTask>();
-            
-            foreach (var kvp in configAddressMap)
-            {
-                // kvp.Key = configName, kvp.Value = address
-                tasks.Add(LoadConfigAsync(kvp.Value, kvp.Key));
+                Log.Error($"[Config] 批量加载完成，但有 {batchResult.FailedCount} 张配置表失败。");
             }
 
-            // 等待所有表全部加载解析完成
-            await UniTask.WhenAll(tasks);
-            Log.Module("Config", "<color=#00FF00>所有配置表批量加载完成！</color>");
+            return batchResult;
         }
-        
-        /// <summary>
-        /// 极简批量异步加载配置表
-        /// 前提约定：Addressables 里的资源 Address 必须和注册的 configName 一致
-        /// </summary>
-        /// <param name="configNames">需要加载的表名数组</param>
+
         public async UniTask LoadConfigsAsync(params string[] configNames)
         {
-            List<UniTask> tasks = new List<UniTask>();
-            foreach (var name in configNames)
+            await TryLoadConfigsAsync(configNames);
+        }
+
+        public async UniTask<ConfigBatchLoadResult> TryLoadConfigsAsync(params string[] configNames)
+        {
+            if (configNames == null || configNames.Length == 0)
             {
-                // 参数1是 Address，参数2是配置表名，这里约定它们同名
-                tasks.Add(LoadConfigAsync(name, name));
+                return new ConfigBatchLoadResult(new ConfigLoadResult[0]);
             }
 
-            await UniTask.WhenAll(tasks);
-            Log.Module("Config", $"<color=#00FF00>成功批量加载 {configNames.Length} 张配置表！</color>");
+            Dictionary<string, string> map = new Dictionary<string, string>(configNames.Length);
+            for (int i = 0; i < configNames.Length; i++)
+            {
+                string name = configNames[i];
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    map[name] = name;
+                }
+            }
+
+            return await TryLoadConfigsBatchAsync(map);
+        }
+
+        private readonly struct ConfigRegistration
+        {
+            public readonly string ConfigName;
+            public readonly Action<byte[]> LoadMethod;
+
+            public ConfigRegistration(string configName, Action<byte[]> loadMethod)
+            {
+                ConfigName = configName;
+                LoadMethod = loadMethod;
+            }
+        }
+    }
+
+    public readonly struct ConfigLoadResult
+    {
+        public readonly bool Success;
+        public readonly string ConfigName;
+        public readonly string Address;
+        public readonly string Error;
+
+        private ConfigLoadResult(bool success, string configName, string address, string error)
+        {
+            Success = success;
+            ConfigName = configName;
+            Address = address;
+            Error = error;
+        }
+
+        public static ConfigLoadResult Succeeded(string configName, string address)
+        {
+            return new ConfigLoadResult(true, configName, address, null);
+        }
+
+        public static ConfigLoadResult Failed(string configName, string address, string error)
+        {
+            return new ConfigLoadResult(false, configName, address, error);
+        }
+    }
+
+    public readonly struct ConfigBatchLoadResult
+    {
+        public readonly ConfigLoadResult[] Results;
+        public readonly int TotalCount;
+        public readonly int SucceededCount;
+        public readonly int FailedCount;
+        public bool Success => FailedCount == 0;
+
+        public ConfigBatchLoadResult(ConfigLoadResult[] results)
+        {
+            Results = results ?? new ConfigLoadResult[0];
+            TotalCount = Results.Length;
+            int succeededCount = 0;
+            int failedCount = 0;
+
+            for (int i = 0; i < Results.Length; i++)
+            {
+                if (Results[i].Success)
+                {
+                    succeededCount++;
+                }
+                else
+                {
+                    failedCount++;
+                }
+            }
+
+            SucceededCount = succeededCount;
+            FailedCount = failedCount;
+        }
+    }
+
+    public readonly struct ConfigLoadedEvent
+    {
+        public readonly string ConfigName;
+        public readonly string Address;
+
+        public ConfigLoadedEvent(string configName, string address)
+        {
+            ConfigName = configName;
+            Address = address;
         }
     }
 }

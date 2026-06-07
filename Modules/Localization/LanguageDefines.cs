@@ -20,6 +20,8 @@ namespace GameFramework.Core
         TR,          // 土耳其文
         NL,          // 荷兰文
         SV,          // 瑞典文
+        CN,          // 中文别名，适配项目里常见的 LanguageConf_CN 命名
+        GE,          // 德文别名，适配项目里常见的 LanguageConf_GE 命名
         // 可以根据发行地区随意扩展...
     }
 
@@ -28,6 +30,8 @@ namespace GameFramework.Core
     /// </summary>
     public struct LanguageChangedEvent
     {
+        public SystemLanguageType RequestedLanguage;
         public SystemLanguageType NewLanguage;
+        public bool IsFallback;
     }
 }

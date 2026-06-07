@@ -1,19 +1,23 @@
-﻿using UnityEngine;
+using UnityEngine;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 namespace GameFramework.Core.UI
 {
-    /// <summary>
-    /// 多语言文本组件
-    /// 挂载在 Text 组件同级节点，配置好 KeyId，语言切换时自动刷新
-    /// </summary>
-    [RequireComponent(typeof(Text))] // 如果你用 TextMeshPro，改成 TMP_Text
+    [RequireComponent(typeof(Text))]
     public class LocalizedText : MonoBehaviour
     {
-        [Tooltip("多语言表中的 ID")]
-        public int KeyId;
+        [FormerlySerializedAs("KeyId")]
+        [SerializeField] private int _keyId;
 
         private Text _textComponent;
+        private bool _subscribed;
+
+        public int KeyId
+        {
+            get => _keyId;
+            set => SetKeyId(value);
+        }
 
         private void Awake()
         {
@@ -22,35 +26,58 @@ namespace GameFramework.Core.UI
 
         private void OnEnable()
         {
-            // 每次激活（打开 UI）时，立即刷新一次当前语言
             RefreshText();
-            // 订阅全局语言切换事件
-            GameApp.Event.AddListener<LanguageChangedEvent>(OnLanguageChanged);
+            Subscribe();
         }
 
         private void OnDisable()
         {
-            // UI 关闭时注销监听，防止报错
-            GameApp.Event.RemoveListener<LanguageChangedEvent>(OnLanguageChanged);
+            Unsubscribe();
         }
 
-        private void OnLanguageChanged(LanguageChangedEvent evt)
+        public void SetKeyId(int newKeyId)
         {
+            _keyId = newKeyId;
             RefreshText();
         }
 
         public void RefreshText()
         {
-            if (KeyId > 0 && GameApp.Loc != null)
+            LocalizationModule localization = GameApp.Loc;
+            if (_textComponent == null || _keyId <= 0 || localization == null)
             {
-                _textComponent.text = GameApp.Loc.GetString(KeyId);
+                return;
             }
+
+            _textComponent.text = localization.GetString(_keyId);
         }
 
-        // 提供给代码动态修改 Key 的接口
-        public void SetKeyId(int newKeyId)
+        private void Subscribe()
         {
-            KeyId = newKeyId;
+            EventModule eventModule = GameApp.Event;
+            if (_subscribed || eventModule == null)
+            {
+                return;
+            }
+
+            eventModule.AddListener<LanguageChangedEvent>(OnLanguageChanged);
+            _subscribed = true;
+        }
+
+        private void Unsubscribe()
+        {
+            EventModule eventModule = GameApp.Event;
+            if (!_subscribed || eventModule == null)
+            {
+                return;
+            }
+
+            eventModule.RemoveListener<LanguageChangedEvent>(OnLanguageChanged);
+            _subscribed = false;
+        }
+
+        private void OnLanguageChanged(LanguageChangedEvent evt)
+        {
             RefreshText();
         }
     }

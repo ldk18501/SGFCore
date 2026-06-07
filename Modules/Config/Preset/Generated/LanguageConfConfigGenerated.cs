@@ -3,12 +3,9 @@
 //     此代码由工具自动生成，请勿手动修改。
 // </auto-generated>
 // ------------------------------------------------------------------------------
-using System;
-using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
 
-public partial class LanguageConf : ConfigManagerBase<LanguageConf>
+public partial class LanguageConf : ConfigManagerBase<string, LanguageConf>
 {
     /// <summary> Key </summary>
     public string id;
@@ -18,8 +15,7 @@ public partial class LanguageConf : ConfigManagerBase<LanguageConf>
     public static void Load(byte[] data)
     {
         Clear();
-        byte xorKey = 85;
-        for (int i = 0; i < data.Length; i++) { data[i] ^= xorKey; }
+        ConfigBinaryCodec.Decode(data);
 
         using (MemoryStream ms = new MemoryStream(data))
         using (BinaryReader br = new BinaryReader(ms))
@@ -28,15 +24,17 @@ public partial class LanguageConf : ConfigManagerBase<LanguageConf>
             for (int i = 0; i < count; i++)
             {
                 LanguageConf item = new LanguageConf();
-                    int len_0 = br.ReadInt32();
-                    item.id = System.Text.Encoding.UTF8.GetString(br.ReadBytes(len_0));
-                    int len_1 = br.ReadInt32();
-                    item.value = System.Text.Encoding.UTF8.GetString(br.ReadBytes(len_1));
+                int len0 = br.ReadInt32();
+                item.id = System.Text.Encoding.UTF8.GetString(br.ReadBytes(len0));
+                int len1 = br.ReadInt32();
+                item.value = System.Text.Encoding.UTF8.GetString(br.ReadBytes(len1));
 
-                List.Add(item);
                 item.OnPostLoad();
+                AddItem(item);
+                AddIndex(item.id, item);
             }
         }
+
         OnAllLoadDone();
     }
 

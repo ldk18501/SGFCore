@@ -23,8 +23,10 @@ namespace GameFramework.Core.UI
 
         private Dictionary<UILayer, Transform> _layerDict;
 
-        private void Awake()
+        protected override void Awake()
         {
+            base.Awake();
+
             // 初始化字典，方便后续按枚举快速获取挂载点
             _layerDict = new Dictionary<UILayer, Transform>
             {

@@ -8,7 +8,7 @@ namespace GameFramework.Core.Demo
     /// 流程状态：启动预热
     /// 负责 Addressables 初始化、检查热更新等耗时操作
     /// </summary>
-    public class ProcedureLaunch : FsmState<GameDemoEntry>
+    public class ProcedureLaunch : ProcedureBase
     {
         public override async void OnEnter()
         {
@@ -28,7 +28,7 @@ namespace GameFramework.Core.Demo
             // TODO: 如果有热更新逻辑（Addressables CheckForCatalogUpdates），在这里执行
 
             // 3. 基建和资源系统热机完毕，进入预加载流程
-            ChangeState<ProcedurePreload>();
+            ChangeProcedure<ProcedurePreload>();
         }
     }
 }

@@ -28,6 +28,7 @@ await GameApp.Res.EnsureInitializedAsync();
 | [Res](Modules/Res/README.md) | Addressables 资源加载、实例化、释放和句柄追踪。 |
 | [Config](Modules/Config/README.md) | 二进制配置表加载和解析分发。 |
 | [Scene](Modules/Scene/README.md) | Addressables 场景加载、切换和卸载。 |
+| [Procedure](Modules/Procedure/README.md) | 游戏主流程管理，例如启动、预加载、主菜单、战斗和结算。 |
 | [Localization](Modules/Localization/README.md) | 多语言表加载、语言切换、UI 文本/图片刷新。 |
 | [UI](Modules/UI/README.md) | UI 注册、打开关闭、层级排序、缓存、Binding Editor 和常用 UI 组件。 |
 | [RedPoint](Modules/RedPoint/README.md) | 低耦合红点系统，支持 UI 监听、条件计算和树形聚合。 |

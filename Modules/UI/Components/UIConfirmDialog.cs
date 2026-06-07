@@ -49,6 +49,7 @@ namespace GameFramework.Core.UI
 
         private void Awake()
         {
+            CacheReferencesIfNeeded();
             RegisterButtons();
         }
 
@@ -65,6 +66,7 @@ namespace GameFramework.Core.UI
             string confirmText = null,
             string cancelText = null)
         {
+            CacheReferencesIfNeeded();
             SetTitle(title);
             SetMessage(message);
             _confirmCallback = onConfirm;
@@ -185,6 +187,78 @@ namespace GameFramework.Core.UI
             }
 
             gameObject.SetActive(false);
+        }
+
+        private void CacheReferencesIfNeeded()
+        {
+            if (_targetForm == null)
+            {
+                _targetForm = GetComponentInParent<UIFormBase>(true);
+            }
+
+            if (_tmpTitleText == null || _tmpMessageText == null)
+            {
+                TMP_Text[] tmpTexts = GetComponentsInChildren<TMP_Text>(true);
+                if (_tmpTitleText == null && tmpTexts.Length > 0)
+                {
+                    _tmpTitleText = tmpTexts[0];
+                }
+
+                if (_tmpMessageText == null && tmpTexts.Length > 1)
+                {
+                    _tmpMessageText = tmpTexts[1];
+                }
+            }
+
+            if (_uguiTitleText == null || _uguiMessageText == null)
+            {
+                Text[] texts = GetComponentsInChildren<Text>(true);
+                if (_uguiTitleText == null && texts.Length > 0)
+                {
+                    _uguiTitleText = texts[0];
+                }
+
+                if (_uguiMessageText == null && texts.Length > 1)
+                {
+                    _uguiMessageText = texts[1];
+                }
+            }
+
+            if (_confirmButton == null || _cancelButton == null || _closeButton == null)
+            {
+                Button[] buttons = GetComponentsInChildren<Button>(true);
+                for (int i = 0; i < buttons.Length; i++)
+                {
+                    string buttonName = buttons[i].name.ToLowerInvariant();
+                    if (_confirmButton == null && (buttonName.Contains("confirm") || buttonName.Contains("ok") || buttonName.Contains("yes")))
+                    {
+                        _confirmButton = buttons[i];
+                    }
+                    else if (_cancelButton == null && (buttonName.Contains("cancel") || buttonName.Contains("no")))
+                    {
+                        _cancelButton = buttons[i];
+                    }
+                    else if (_closeButton == null && buttonName.Contains("close"))
+                    {
+                        _closeButton = buttons[i];
+                    }
+                }
+
+                if (_confirmButton == null && buttons.Length > 0)
+                {
+                    _confirmButton = buttons[0];
+                }
+
+                if (_cancelButton == null && buttons.Length > 1)
+                {
+                    _cancelButton = buttons[1];
+                }
+
+                if (_closeButton == null && buttons.Length > 2)
+                {
+                    _closeButton = buttons[2];
+                }
+            }
         }
 
         private static void SetButtonText(Button button, string text)
