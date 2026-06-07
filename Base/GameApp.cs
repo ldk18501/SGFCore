@@ -20,6 +20,9 @@ namespace GameFramework.Core
         private static SaveModule _save;
         public static SaveModule Save => _save ??= FrameworkEntry.Instance.GetModule<SaveModule>();
 
+        private static CryptoModule _crypto;
+        public static CryptoModule Crypto => _crypto ??= FrameworkEntry.Instance.GetModule<CryptoModule>();
+
         private static ResourceModule _res;
         public static ResourceModule Res => _res ??= FrameworkEntry.Instance.GetModule<ResourceModule>();
 
@@ -31,6 +34,9 @@ namespace GameFramework.Core
 
         private static UIModule _ui;
         public static UIModule UI => _ui ??= FrameworkEntry.Instance.GetModule<UIModule>();
+
+        private static RedPointModule _redPoint;
+        public static RedPointModule RedPoint => _redPoint ??= FrameworkEntry.Instance.GetModule<RedPointModule>();
 
         private static ConfigModule _config;
         public static ConfigModule Config => _config ??= FrameworkEntry.Instance.GetModule<ConfigModule>();

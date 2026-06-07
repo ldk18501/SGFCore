@@ -10,6 +10,20 @@ namespace GameFramework.Core.UI
     [RequireComponent(typeof(Canvas), typeof(GraphicRaycaster))]
     public abstract class UIFormBase : MonoBehaviour
     {
+#if UNITY_EDITOR
+        [HideInInspector] [SerializeField] private UIBindingField[] _bindingFields = new UIBindingField[0];
+
+        public UIBindingField[] GetBindingFields()
+        {
+            return _bindingFields;
+        }
+
+        public void SetBindingFields(UIBindingField[] fields)
+        {
+            _bindingFields = fields ?? new UIBindingField[0];
+        }
+#endif
+
         // 缓存面板内所有的动效组件
         private UITweenElement[] _tweenElements;
 

@@ -1,20 +1,26 @@
-﻿using GameFramework.Core.Utility;
 using UnityEngine;
 
 namespace GameFramework.Core.UI
 {
     /// <summary>
-    /// UI 绑定并跟随 3D 静态坐标 (Vector3)
+    /// UI 绑定并跟随 3D 静态坐标 (Vector3)。
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
     [RequireComponent(typeof(CanvasGroup))]
     public class UIBindPos : MonoBehaviour
     {
-        [Header("--- 绑定坐标 ---")]
+        [Header("绑定坐标")]
         public Vector3 WorldPos;
 
-        [Header("--- 摄像机配置 ---")]
+        [Header("摄像机配置")]
         public Camera WorldCamera;
+
+        [Header("显示控制")]
+        public bool HideWhenOutsideViewport = true;
+        public bool ClampToParentRect;
+        public Vector2 ParentPadding = new Vector2(16f, 16f);
+        public bool InteractableWhenVisible;
+        public bool BlocksRaycastsWhenHidden;
 
         private RectTransform _rect;
         private RectTransform _parentRect;
@@ -26,27 +32,36 @@ namespace GameFramework.Core.UI
             _parentRect = _rect.parent as RectTransform;
             _canvasGroup = GetComponent<CanvasGroup>();
 
-            if (WorldCamera == null) WorldCamera = Camera.main;
+            if (WorldCamera == null)
+            {
+                WorldCamera = Camera.main;
+            }
         }
 
         private void LateUpdate()
         {
-            if (WorldCamera == null || _parentRect == null) return;
-
-            var uiLocalPos = Vector2.zero;
-            bool isFront = UIRoot.Instance.RootCanvas.renderMode == RenderMode.ScreenSpaceOverlay
-                ? _parentRect.WorldToUIPosition(WorldPos, WorldCamera, null, out uiLocalPos)
-                : _parentRect.WorldToUIPosition(WorldPos, WorldCamera, UIRoot.Instance.UICamera, out uiLocalPos); 
-
-            if (isFront)
+            if (WorldCamera == null || _parentRect == null)
             {
-                _rect.anchoredPosition = uiLocalPos;
-                if (_canvasGroup.alpha < 1f) _canvasGroup.alpha = 1f;
+                UIWorldBindingUtility.SetVisible(_canvasGroup, false, InteractableWhenVisible, BlocksRaycastsWhenHidden);
+                return;
             }
-            else
+
+            bool canConvert = UIWorldBindingUtility.TryGetLocalPosition(
+                _parentRect,
+                WorldPos,
+                WorldCamera,
+                out Vector2 uiLocalPos,
+                out bool insideViewport);
+
+            bool visible = canConvert && (insideViewport || !HideWhenOutsideViewport || ClampToParentRect);
+            if (visible)
             {
-                if (_canvasGroup.alpha > 0f) _canvasGroup.alpha = 0f;
+                _rect.anchoredPosition = ClampToParentRect
+                    ? UIWorldBindingUtility.ClampToRect(_parentRect, uiLocalPos, ParentPadding)
+                    : uiLocalPos;
             }
+
+            UIWorldBindingUtility.SetVisible(_canvasGroup, visible, InteractableWhenVisible, BlocksRaycastsWhenHidden);
         }
 
         public void Bind(Vector3 fixedWorldPos)

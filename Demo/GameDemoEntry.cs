@@ -53,6 +53,7 @@ namespace GameFramework.Core.Demo
             // 7. 启动表现层核心：资源、UI、音效、配置表
             framework.RegisterModule(new ResourceModule());
             framework.RegisterModule(new UIModule());
+            framework.RegisterModule(new RedPointModule());
             framework.RegisterModule(new AudioModule());
             framework.RegisterModule(new ConfigModule());
 

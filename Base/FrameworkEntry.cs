@@ -41,6 +41,7 @@ namespace GameFramework.Core
             // 7. 启动表现层核心：资源、UI、音效、配置表
             RegisterModule(new ResourceModule());
             RegisterModule(new UIModule());
+            RegisterModule(new RedPointModule());
             RegisterModule(new AudioModule());
             RegisterModule(new ConfigModule());
 
