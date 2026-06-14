@@ -9,6 +9,8 @@ namespace GameFramework.Core.Demo
     /// </summary>
     public class GameDemoEntry : MonoBehaviour
     {
+        [SerializeField] private FrameworkConfig _frameworkConfig;
+
         private void Start()
         {
             // 确保游戏在后台运行
@@ -25,7 +27,7 @@ namespace GameFramework.Core.Demo
 
         private void InitFrameworkModules()
         {
-            FrameworkEntry.Instance.InitFrameworkModules();
+            FrameworkEntry.Instance.InitFrameworkModules(_frameworkConfig);
         }
 
         private void StartGameProcedure()

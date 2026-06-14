@@ -45,7 +45,10 @@ namespace GameFramework.Core
                 list = new List<Delegate>();
                 _delegates[type] = list;
             }
-            list.Add(handler);
+            if (!list.Contains(handler))
+            {
+                list.Add(handler);
+            }
         }
 
         /// <summary>
@@ -90,9 +93,11 @@ namespace GameFramework.Core
             Type type = typeof(T);
             if (_delegates.TryGetValue(type, out var list))
             {
-                for (int i = 0; i < list.Count; i++)
+                Delegate[] snapshot = list.ToArray();
+
+                for (int i = 0; i < snapshot.Length; i++)
                 {
-                    ((Action<T>)list[i]).Invoke(eventData);
+                    ((Action<T>)snapshot[i]).Invoke(eventData);
                 }
             }
         }

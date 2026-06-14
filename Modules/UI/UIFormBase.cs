@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.UI;
@@ -31,6 +32,8 @@ namespace GameFramework.Core.UI
         public UILayer Layer { get; internal set; }
         public int FormId { get; internal set; }
         public bool IsCached { get; internal set; } // 标记当前面板是否是缓存模式
+        public bool IsClosing { get; internal set; }
+        public bool IsDestroyed { get; private set; }
 
         private Canvas _canvas;
 
@@ -54,6 +57,8 @@ namespace GameFramework.Core.UI
             FormId = formId;
             Layer = layer;
             IsCached = isCached;
+            IsClosing = false;
+            IsDestroyed = false;
 
             _canvas = GetComponent<Canvas>();
             _canvas.overrideSorting = true;
@@ -160,12 +165,19 @@ namespace GameFramework.Core.UI
         // 内部调用的生命周期包装器
         internal void InternalClose()
         {
+            IsClosing = true;
             OnClose();
             UnsubscribeAllEvents(); // 隐藏时立刻断开事件，防止后台耗性能
         }
 
         internal void InternalDestroy()
         {
+            if (IsDestroyed)
+            {
+                return;
+            }
+
+            IsDestroyed = true;
             OnDestroyUI();
             UnloadAllResources(); // 彻底销毁时才释放图片和特效
         }
@@ -175,6 +187,11 @@ namespace GameFramework.Core.UI
         // 异步等待所有入场动画完成
         // ==========================================
         public async UniTask PlayOpenAnimationAsync()
+        {
+            await PlayOpenAnimationAsync(default(CancellationToken));
+        }
+
+        public async UniTask PlayOpenAnimationAsync(CancellationToken cancellationToken)
         {
             if (_tweenElements == null || _tweenElements.Length == 0) return;
 
@@ -188,7 +205,7 @@ namespace GameFramework.Core.UI
                     Sequence seq = elem.PlayIn();
                     if (seq.isAlive)
                     {
-                        tasks.Add(seq.ToUniTask());
+                        tasks.Add(seq.ToUniTask(cancellationToken: cancellationToken));
                     }
                 }
             }
@@ -205,6 +222,11 @@ namespace GameFramework.Core.UI
         // ==========================================
         public async UniTask PlayCloseAnimationAsync()
         {
+            await PlayCloseAnimationAsync(default(CancellationToken));
+        }
+
+        public async UniTask PlayCloseAnimationAsync(CancellationToken cancellationToken)
+        {
             if (_tweenElements == null || _tweenElements.Length == 0) return;
 
             List<UniTask> tasks = new List<UniTask>(_tweenElements.Length);
@@ -216,7 +238,7 @@ namespace GameFramework.Core.UI
                     Sequence seq = elem.PlayOut();
                     if (seq.isAlive)
                     {
-                        tasks.Add(seq.ToUniTask());
+                        tasks.Add(seq.ToUniTask(cancellationToken: cancellationToken));
                     }
                 }
             }

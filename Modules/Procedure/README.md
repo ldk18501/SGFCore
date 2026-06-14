@@ -7,7 +7,7 @@ Procedure 模块负责管理游戏主流程，例如启动预热、预加载、�
 ```csharp
 public class ProcedureLaunch : ProcedureBase
 {
-    public override async void OnEnter()
+    public override async UniTask OnEnterAsync(CancellationToken cancellationToken)
     {
         bool ready = await GameApp.Res.EnsureInitializedAsync();
         if (!ready)

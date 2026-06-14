@@ -1,0 +1,17 @@
+{
+    "name": "SGFCore.Demo",
+    "rootNamespace": "",
+    "references": [
+        "SGFCore.Runtime",
+        "UniTask"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

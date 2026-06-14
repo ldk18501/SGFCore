@@ -55,6 +55,10 @@ namespace GameFramework.Core
                 if (task.CurrentTime >= task.Delay)
                 {
                     task.Callback?.Invoke();
+                    if (task.IsDone || !_tasks.Contains(task))
+                    {
+                        continue;
+                    }
 
                     if (task.LoopCount > 0) task.LoopCount--;
 
@@ -88,6 +92,24 @@ namespace GameFramework.Core
         /// <returns>定时器唯一ID，用于取消</returns>
         public long AddTimer(float delay, Action callback, bool isUnscaled = false, int loopCount = 1)
         {
+            if (delay <= 0f)
+            {
+                Log.Warning($"[Timer] 添加定时器失败：delay 必须大于 0，当前值 {delay}。");
+                return 0;
+            }
+
+            if (callback == null)
+            {
+                Log.Warning("[Timer] 添加定时器失败：callback 为空。");
+                return 0;
+            }
+
+            if (loopCount == 0 || loopCount < -1)
+            {
+                Log.Warning($"[Timer] 添加定时器失败：loopCount 只能为 -1 或大于 0，当前值 {loopCount}。");
+                return 0;
+            }
+
             // 从对象池获取，零 GC 分配！
             var task = _pool.AllocateClass<TimerTask>();
             task.Id = _nextTimerId++;
@@ -135,7 +157,7 @@ namespace GameFramework.Core
         public float GetRemainingTime(long timerId)
         {
             var task = _tasks.Find(t => t.Id == timerId);
-            return task != null ? task.Delay - task.CurrentTime : 0f;
+            return task != null ? Math.Max(0f, task.Delay - task.CurrentTime) : 0f;
         }
 
         public void CancelAllTimers()

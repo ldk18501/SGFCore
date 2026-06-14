@@ -11,9 +11,22 @@ namespace GameFramework.Core
     {
         private readonly List<IFrameworkModule> _modules = new List<IFrameworkModule>();
         private readonly Dictionary<Type, IFrameworkModule> _moduleDict = new Dictionary<Type, IFrameworkModule>();
+        private FrameworkConfig _config;
+        private bool _isInitialized;
+        private bool _isInitializing;
 
-        public void InitFrameworkModules()
+        public void InitFrameworkModules(FrameworkConfig config = null)
         {
+            if (_isInitialized || _isInitializing)
+            {
+                Debug.LogWarning("[Framework] 框架模块已经初始化，重复调用已忽略。");
+                return;
+            }
+
+            _isInitializing = true;
+            _config = config;
+            GameApp.Reset();
+
             // 【严格的初始化顺序】千万不能乱！
 
             // 1. 最先启动日志，确保后续的报错都能存下来
@@ -25,10 +38,8 @@ namespace GameFramework.Core
             // 3. 启动文件系统，准备好读写硬盘的能力
             RegisterModule(new FileSystemModule());
 
-            // 4. 启动加密模块，并立刻注入你的游戏专属密钥
-            var crypto = new CryptoModule();
-            RegisterModule(crypto);
-            crypto.SetCryptoKey("MySuperSecretKey", "MySuperSecretIV1"); // 替换为你的密钥
+            // 4. 启动加密模块，密钥由 FrameworkConfig 或业务层显式注入
+            RegisterModule(new CryptoModule());
 
             // 5. 启动存档模块 (依赖文件系统和加密)
             RegisterModule(new SaveModule());
@@ -52,6 +63,15 @@ namespace GameFramework.Core
             RegisterModule(new FsmModule());
             RegisterModule(new ProcedureModule());
 
+            _modules.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+            for (int i = 0; i < _modules.Count; i++)
+            {
+                _modules[i].OnInit();
+            }
+
+            ApplyStartupConfig();
+            _isInitializing = false;
+            _isInitialized = true;
             Log.Info("<color=#00FF00>[GameEntry] 框架基础核心模块组装完毕！</color>");
         }
 
@@ -76,6 +96,10 @@ namespace GameFramework.Core
 
             _modules.Clear();
             _moduleDict.Clear();
+            _isInitialized = false;
+            _isInitializing = false;
+            _config = null;
+            GameApp.Reset();
         }
 
         /// <summary>
@@ -91,11 +115,14 @@ namespace GameFramework.Core
             }
 
             _modules.Add(module);
-            // 根据优先级排序
-            _modules.Sort((a, b) => a.Priority.CompareTo(b.Priority));
             _moduleDict.Add(type, module);
 
-            module.OnInit();
+            if (_isInitialized && !_isInitializing)
+            {
+                _modules.Sort((a, b) => a.Priority.CompareTo(b.Priority));
+                module.OnInit();
+            }
+
             Debug.Log($"[Framework] 模块注册成功: {type.Name}");
         }
 
@@ -112,6 +139,22 @@ namespace GameFramework.Core
 
             Debug.LogError($"[Framework] 找不到模块: {type.Name}");
             return null;
+        }
+
+        private void ApplyStartupConfig()
+        {
+            if (_config == null || !_config.ConfigureCryptoOnStartup)
+            {
+                return;
+            }
+
+            CryptoModule crypto = GetModule<CryptoModule>();
+            if (crypto == null)
+            {
+                return;
+            }
+
+            crypto.SetCryptoKey(_config.CryptoKey, _config.CryptoIV);
         }
     }
 }

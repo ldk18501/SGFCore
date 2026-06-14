@@ -1,3 +1,6 @@
+using System.Threading;
+using Cysharp.Threading.Tasks;
+
 namespace GameFramework.Core
 {
     /// <summary>
@@ -21,6 +24,12 @@ namespace GameFramework.Core
 
         public virtual void OnEnter()
         {
+        }
+
+        public virtual UniTask OnEnterAsync(CancellationToken cancellationToken)
+        {
+            OnEnter();
+            return UniTask.CompletedTask;
         }
 
         public virtual void OnUpdate(float deltaTime, float unscaledDeltaTime)

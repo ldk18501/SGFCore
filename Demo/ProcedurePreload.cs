@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using GameFramework.Core;
@@ -11,7 +12,7 @@ namespace GameFramework.Core.Demo
     /// </summary>
     public class ProcedurePreload : ProcedureBase
     {
-        public override async void OnEnter()
+        public override async UniTask OnEnterAsync(CancellationToken cancellationToken)
         {
             Log.Info("=== 进入流程：资源与配置预加载 ===");
 
@@ -30,7 +31,7 @@ namespace GameFramework.Core.Demo
             // 模拟进度条更新 (在真实项目中可以细分加载步骤)
             // GameApp.Event.Broadcast(new UpdateLoadingProgressEvent { Progress = 0.5f });
 
-            await GameApp.Config.LoadConfigsBatchAsync(configsToLoad);
+            await GameApp.Config.TryLoadConfigsBatchAsync(configsToLoad, cancellationToken);
 
             // 3. 读取玩家本地存档
             var save = GameApp.Save.LoadData<SimulationSaveData>("MainSave");

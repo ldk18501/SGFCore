@@ -1,0 +1,22 @@
+{
+    "name": "SGFCore.Runtime",
+    "rootNamespace": "",
+    "references": [
+        "UniTask",
+        "UniTask.Addressables",
+        "PrimeTween.Runtime",
+        "BehaviorDesigner.Runtime",
+        "Unity.Addressables",
+        "Unity.ResourceManager",
+        "Unity.TextMeshPro"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

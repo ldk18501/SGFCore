@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using GameFramework.Core.UI;
@@ -31,9 +32,12 @@ namespace GameFramework.Core
         private readonly Dictionary<int, int> _singletonForms = new Dictionary<int, int>();
 
         private int _nextSerialId = 1;
+        private CancellationTokenSource _lifecycleCts;
 
         public void OnInit()
         {
+            _lifecycleCts = new CancellationTokenSource();
+
             foreach (UILayer layer in Enum.GetValues(typeof(UILayer)))
             {
                 _layerActiveList[layer] = new List<UIFormBase>();
@@ -71,6 +75,29 @@ namespace GameFramework.Core
 
         public void OnDestroy()
         {
+            if (_lifecycleCts != null)
+            {
+                _lifecycleCts.Cancel();
+                _lifecycleCts.Dispose();
+                _lifecycleCts = null;
+            }
+
+            DestroyAllForms();
+
+            _configs.Clear();
+            _activeForms.Clear();
+            _cachedForms.Clear();
+            _singletonForms.Clear();
+            foreach (List<UIFormBase> list in _layerActiveList.Values)
+            {
+                list.Clear();
+            }
+
+            if (_recyclePoolNode != null)
+            {
+                UnityEngine.Object.Destroy(_recyclePoolNode.gameObject);
+                _recyclePoolNode = null;
+            }
         }
 
         // ==========================================
@@ -79,6 +106,7 @@ namespace GameFramework.Core
         public async UniTask<int> OpenUIAsync(int formId, params object[] args)
         {
             if (!_configs.TryGetValue(formId, out UIFormConfig config)) return 0;
+            CancellationToken cancellationToken = GetLifecycleToken();
 
             // 1. 【单例检查】如果它是单例，且当前已经在显示了，直接刷新 Order 并重调 OnOpen
             if (config.IsSingleton && _singletonForms.TryGetValue(formId, out int activeSerialId))
@@ -104,6 +132,7 @@ namespace GameFramework.Core
                 // 重新挂载到正确的渲染层级，并激活
                 form.transform.SetParent(_uiRoot.GetLayerNode(config.Layer), false);
                 form.gameObject.SetActive(true);
+                form.IsClosing = false;
 
                 Log.Info($"[UI] 极速秒开缓存界面: {form.GetType().Name}");
             }
@@ -112,9 +141,26 @@ namespace GameFramework.Core
                 // 3. 【全新加载】
                 Transform parentNode = _uiRoot.GetLayerNode(config.Layer);
                 GameObject uiInstance = await GameApp.Res.InstantiateAsync(config.PrefabAddress, parentNode);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    if (uiInstance != null)
+                    {
+                        GameApp.Res.ReleaseInstance(uiInstance);
+                    }
+
+                    return 0;
+                }
+
                 if (uiInstance == null) return 0;
 
                 form = uiInstance.GetComponent(config.ScriptType) as UIFormBase;
+                if (form == null)
+                {
+                    Log.Error($"[UI] 预制体缺少指定 UI 脚本: formId={formId}, type={config.ScriptType?.Name}");
+                    GameApp.Res.ReleaseInstance(uiInstance);
+                    return 0;
+                }
+
                 serialId = _nextSerialId++;
 
                 form.InternalInit(serialId, formId, config.Layer, config.IsCached);
@@ -129,7 +175,7 @@ namespace GameFramework.Core
             form.OnOpen(args); // 无论怎样都会调用 OnOpen
 
             // 5. 播放惊艳的入场动画！(不阻塞业务逻辑，让动画自己去飞)
-            form.PlayOpenAnimationAsync().Forget();
+            form.PlayOpenAnimationAsync(cancellationToken).Forget();
 
             return serialId;
         }
@@ -139,40 +185,14 @@ namespace GameFramework.Core
         // ==========================================
         public void CloseUI(int serialId)
         {
-            if (!_activeForms.TryGetValue(serialId, out UIFormBase form)) return;
-
-            // 1. 触发内部关闭流程（会触发 OnClose 和自动清理事件）
-            form.InternalClose();
-
-            // 2. 从活跃列表移除
-            _activeForms.Remove(serialId);
-            _layerActiveList[form.Layer].Remove(form);
-
-            if (_configs[form.FormId].IsSingleton)
-            {
-                _singletonForms.Remove(form.FormId);
-            }
-
-            // 3. 【缓存判定】
-            if (form.IsCached)
-            {
-                // 丢进回收站，静默挂起
-                form.transform.SetParent(_recyclePoolNode, false);
-                _cachedForms[form.FormId] = form;
-                Log.Info($"[UI] 面板已休眠至缓存池: {form.GetType().Name}");
-            }
-            else
-            {
-                // 彻底粉碎（会触发 OnDestroyUI 和自动清理资源）
-                form.InternalDestroy();
-                GameApp.Res.ReleaseInstance(form.gameObject);
-                Log.Info($"[UI] 面板已彻底销毁: {form.GetType().Name}");
-            }
+            CloseUIAsync(serialId).Forget();
         }
 
         public async UniTask CloseUIAsync(int serialId)
         {
             if (!_activeForms.TryGetValue(serialId, out UIFormBase form)) return;
+            if (form.IsClosing) return;
+            CancellationToken cancellationToken = GetLifecycleToken();
 
             // 1. 触发内部关闭流程（会触发 OnClose 和自动清理事件）
             form.InternalClose();
@@ -185,23 +205,34 @@ namespace GameFramework.Core
             {
                 _singletonForms.Remove(form.FormId);
             }
-            
+
             // 3. 等待退场动画播完
-            await form.PlayCloseAnimationAsync();
+            try
+            {
+                await form.PlayCloseAnimationAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
 
             // 4. 【缓存判定】
-            if (form.IsCached)
+            if (cancellationToken.IsCancellationRequested)
+            {
+                DestroyForm(form);
+            }
+            else if (form.IsCached)
             {
                 // 丢进回收站，静默挂起
                 form.transform.SetParent(_recyclePoolNode, false);
+                form.gameObject.SetActive(false);
+                form.IsClosing = false;
                 _cachedForms[form.FormId] = form;
                 Log.Info($"[UI] 面板已休眠至缓存池: {form.GetType().Name}");
             }
             else
             {
                 // 彻底粉碎（会触发 OnDestroyUI 和自动清理资源）
-                form.InternalDestroy();
-                GameApp.Res.ReleaseInstance(form.gameObject);
+                DestroyForm(form);
                 Log.Info($"[UI] 面板已彻底销毁: {form.GetType().Name}");
             }
         }
@@ -238,6 +269,38 @@ namespace GameFramework.Core
         {
             var form = _activeForms.Values.FirstOrDefault(f => f is T);
             if (form != null) CloseUI(form.SerialId);
+        }
+
+        private CancellationToken GetLifecycleToken()
+        {
+            if (_lifecycleCts == null)
+            {
+                _lifecycleCts = new CancellationTokenSource();
+            }
+
+            return _lifecycleCts.Token;
+        }
+
+        private void DestroyAllForms()
+        {
+            List<UIFormBase> forms = new List<UIFormBase>(_activeForms.Values);
+            forms.AddRange(_cachedForms.Values);
+
+            for (int i = 0; i < forms.Count; i++)
+            {
+                DestroyForm(forms[i]);
+            }
+        }
+
+        private void DestroyForm(UIFormBase form)
+        {
+            if (form == null || form.IsDestroyed)
+            {
+                return;
+            }
+
+            form.InternalDestroy();
+            GameApp.Res.ReleaseInstance(form.gameObject);
         }
     }
 }

@@ -44,7 +44,17 @@ namespace GameFramework.Core
         }
 
         public void OnUpdate(float deltaTime, float unscaledDeltaTime) { }
-        public void OnDestroy() { }
+        public void OnDestroy()
+        {
+            ClearAllGameObjectPools();
+            _classPools.Clear();
+
+            if (_poolRoot != null)
+            {
+                UnityEngine.Object.Destroy(_poolRoot.gameObject);
+                _poolRoot = null;
+            }
+        }
 
         // ==========================================
         // C# 内存池 API
@@ -72,6 +82,13 @@ namespace GameFramework.Core
                 pool = new Queue<IReference>();
                 _classPools[type] = pool;
             }
+
+            if (pool.Contains(refObj))
+            {
+                Log.Warning($"[Pool] 重复回收类对象已忽略: {type.Name}");
+                return;
+            }
+
             pool.Enqueue(refObj);
         }
 
@@ -112,6 +129,12 @@ namespace GameFramework.Core
             {
                 pool = new Queue<GameObject>();
                 _gameObjectPools[poolName] = pool;
+            }
+
+            if (ContainsGameObject(pool, go))
+            {
+                Log.Warning($"[Pool] 重复回收 GameObject 已忽略: pool={poolName}, object={go.name}");
+                return;
             }
 
             if (_poolConfigs.TryGetValue(poolName, out var config) && pool.Count >= config.MaxCapacity)
@@ -157,6 +180,27 @@ namespace GameFramework.Core
                 }
                 _gameObjectPools.Remove(poolName);
             }
+        }
+
+        public void ClearAllGameObjectPools()
+        {
+            foreach (string poolName in new List<string>(_gameObjectPools.Keys))
+            {
+                ClearPool(poolName);
+            }
+        }
+
+        private static bool ContainsGameObject(Queue<GameObject> pool, GameObject target)
+        {
+            foreach (GameObject item in pool)
+            {
+                if (item == target)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

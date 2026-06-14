@@ -1,0 +1,24 @@
+{
+    "name": "SGFCore.Config.Editor",
+    "rootNamespace": "",
+    "references": [
+        "SGFCore.Runtime",
+        "Unity.Addressables.Editor",
+        "Unity.Addressables",
+        "Unity.ResourceManager"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "ExcelDataReader.dll",
+        "ExcelDataReader.DataSet.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

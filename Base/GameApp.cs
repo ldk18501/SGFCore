@@ -72,7 +72,30 @@ namespace GameFramework.Core
         // 例如：极简的全局抛事件接口
         public static void Broadcast<T>(T eventData) where T : struct
         {
-            Event.Broadcast(eventData);
+            Event?.Broadcast(eventData);
+        }
+
+        internal static void Reset()
+        {
+            _event = null;
+            _fileSystem = null;
+            _save = null;
+            _crypto = null;
+            _res = null;
+            _timer = null;
+            _time = null;
+            _pool = null;
+            _ui = null;
+            _redPoint = null;
+            _guide = null;
+            _config = null;
+            _audio = null;
+            _fsm = null;
+            _bt = null;
+            _loc = null;
+            _http = null;
+            _scene = null;
+            _procedure = null;
         }
     }
 }

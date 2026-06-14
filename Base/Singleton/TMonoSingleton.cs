@@ -51,6 +51,7 @@ namespace GameFramework.Core
             if (_instance == null)
             {
                 _instance = this as T;
+                _applicationIsQuitting = false;
                 DontDestroyOnLoad(gameObject);
             }
             else if (_instance != this)
@@ -67,7 +68,10 @@ namespace GameFramework.Core
 
         protected virtual void OnDestroy()
         {
-            _applicationIsQuitting = true;
+            if (_instance == this)
+            {
+                _instance = null;
+            }
         }
     }
 }

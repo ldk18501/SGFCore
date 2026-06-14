@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 
 namespace GameFramework.Core
 {
@@ -12,6 +14,7 @@ namespace GameFramework.Core
 
         private readonly Dictionary<Type, ProcedureBase> _procedures = new Dictionary<Type, ProcedureBase>();
         private readonly Dictionary<string, object> _blackboard = new Dictionary<string, object>();
+        private CancellationTokenSource _procedureCts;
 
         public object Owner { get; private set; }
         public ProcedureBase CurrentProcedure { get; private set; }
@@ -112,13 +115,15 @@ namespace GameFramework.Core
 
             ProcedureBase previousProcedure = CurrentProcedure;
             previousProcedure?.OnLeave();
+            CancelCurrentProcedureAsyncWork();
             CurrentProcedure = nextProcedure;
 
             GameApp.Event?.Broadcast(new ProcedureChangedEvent(
                 previousProcedure != null ? previousProcedure.GetType() : null,
                 CurrentProcedure.GetType()));
 
-            CurrentProcedure.OnEnter();
+            _procedureCts = new CancellationTokenSource();
+            RunProcedureEnterAsync(CurrentProcedure, _procedureCts.Token).Forget();
         }
 
         public bool HasProcedure<TProcedure>() where TProcedure : ProcedureBase
@@ -142,6 +147,7 @@ namespace GameFramework.Core
 
             ProcedureBase previousProcedure = CurrentProcedure;
             previousProcedure.OnLeave();
+            CancelCurrentProcedureAsyncWork();
             CurrentProcedure = null;
 
             GameApp.Event?.Broadcast(new ProcedureStoppedEvent(previousProcedure.GetType()));
@@ -181,6 +187,33 @@ namespace GameFramework.Core
 
             _procedures.Clear();
             _blackboard.Clear();
+        }
+
+        private void CancelCurrentProcedureAsyncWork()
+        {
+            if (_procedureCts == null)
+            {
+                return;
+            }
+
+            _procedureCts.Cancel();
+            _procedureCts.Dispose();
+            _procedureCts = null;
+        }
+
+        private async UniTaskVoid RunProcedureEnterAsync(ProcedureBase procedure, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await procedure.OnEnterAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[Procedure] 流程进入异常: {procedure.GetType().Name}, {e}");
+            }
         }
     }
 

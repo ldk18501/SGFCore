@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -135,6 +136,7 @@ namespace GameFramework.Core
         private bool _bgmPaused;
         private long _nextAudioId = 1;
         private BgmFade _bgmFade;
+        private CancellationTokenSource _lifecycleCts;
 
         public float BGMVolume => GetGroupVolume(AudioGroup.BGM);
         public float SFXVolume => GetGroupVolume(AudioGroup.SFX);
@@ -143,6 +145,8 @@ namespace GameFramework.Core
 
         public void OnInit()
         {
+            _lifecycleCts = new CancellationTokenSource();
+
             foreach (AudioGroup group in Enum.GetValues(typeof(AudioGroup)))
             {
                 _groups[group] = new GroupState { Volume = 1f, Muted = false, Paused = false };
@@ -181,11 +185,22 @@ namespace GameFramework.Core
 
         public void OnDestroy()
         {
+            if (_lifecycleCts != null)
+            {
+                _lifecycleCts.Cancel();
+            }
+
             StopAll();
             if (_bgmClip != null)
             {
                 GameApp.Res.ReleaseAsset(_bgmClip);
                 _bgmClip = null;
+            }
+
+            if (_lifecycleCts != null)
+            {
+                _lifecycleCts.Dispose();
+                _lifecycleCts = null;
             }
         }
 
@@ -213,9 +228,20 @@ namespace GameFramework.Core
                 return;
             }
 
+            CancellationToken cancellationToken = GetLifecycleToken();
             await StopBGMAsync(fadeDuration);
 
-            AudioClip clip = await GameApp.Res.LoadAssetAsync<AudioClip>(address);
+            AudioClip clip = await GameApp.Res.LoadAssetAsync<AudioClip>(address, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (clip != null)
+                {
+                    GameApp.Res.ReleaseAsset(clip);
+                }
+
+                return;
+            }
+
             if (clip == null || _bgmSource == null)
             {
                 Log.Warning($"[Audio] BGM 加载失败: {address}");
@@ -357,7 +383,7 @@ namespace GameFramework.Core
                 _singletonMap[singletonKey] = task;
             }
 
-            LoadAndPlayAsync(task).Forget();
+            LoadAndPlayAsync(task, task.TaskId).Forget();
             return task.Handle;
         }
 
@@ -506,9 +532,20 @@ namespace GameFramework.Core
             return GetState(group).Muted;
         }
 
-        private async UniTaskVoid LoadAndPlayAsync(AudioTask task)
+        private async UniTaskVoid LoadAndPlayAsync(AudioTask task, long taskId)
         {
-            AudioClip clip = await GameApp.Res.LoadAssetAsync<AudioClip>(task.Address);
+            CancellationToken cancellationToken = GetLifecycleToken();
+            AudioClip clip = await GameApp.Res.LoadAssetAsync<AudioClip>(task.Address, cancellationToken);
+            if (!_taskMap.TryGetValue(taskId, out AudioTask currentTask) || currentTask != task)
+            {
+                if (clip != null)
+                {
+                    GameApp.Res.ReleaseAsset(clip);
+                }
+
+                return;
+            }
+
             if (task.IsAborted)
             {
                 if (clip != null)
@@ -521,6 +558,16 @@ namespace GameFramework.Core
                 {
                     RemoveTaskAt(abortedIndex, "Aborted");
                 }
+                return;
+            }
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                if (clip != null)
+                {
+                    GameApp.Res.ReleaseAsset(clip);
+                }
+
                 return;
             }
 
@@ -735,6 +782,16 @@ namespace GameFramework.Core
         private void Broadcast<T>(T eventData) where T : struct
         {
             GameApp.Event?.Broadcast(eventData);
+        }
+
+        private CancellationToken GetLifecycleToken()
+        {
+            if (_lifecycleCts == null)
+            {
+                _lifecycleCts = new CancellationTokenSource();
+            }
+
+            return _lifecycleCts.Token;
         }
     }
 }

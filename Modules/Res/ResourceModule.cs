@@ -34,6 +34,11 @@ namespace GameFramework.Core
         public int TrackedAssetCount => _assetHandles.Count;
         public int TrackedInstanceCount => _instanceHandles.Count;
 
+        public ResourceScope CreateScope(string owner)
+        {
+            return new ResourceScope(this, owner);
+        }
+
         public void OnInit()
         {
             _isDestroyed = false;

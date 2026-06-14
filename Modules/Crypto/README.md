@@ -9,7 +9,7 @@ Crypto 模块提供 AES 字符串和字节数组加密解密，主要服务于�
 ```csharp
 var crypto = new CryptoModule();
 RegisterModule(crypto);
-crypto.SetCryptoKey("MySuperSecretKey", "MySuperSecretIV1");
+crypto.SetCryptoKey("Your16Or32ByteKey", "Your16ByteIVValue");
 ```
 
 正式项目应替换为自己的 Key 和 IV。
