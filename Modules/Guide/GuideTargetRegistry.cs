@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace GameFramework.Core
@@ -5,7 +6,10 @@ namespace GameFramework.Core
     public static class GuideTargetRegistry
     {
         private static readonly Dictionary<string, List<GuideTarget>> Targets =
-            new Dictionary<string, List<GuideTarget>>();
+            new Dictionary<string, List<GuideTarget>>(StringComparer.OrdinalIgnoreCase);
+
+        public static event Action<string> TargetRegistered;
+        public static event Action<string> TargetClicked;
 
         public static void Register(string key, GuideTarget target)
         {
@@ -24,6 +28,7 @@ namespace GameFramework.Core
             if (!list.Contains(target))
             {
                 list.Add(target);
+                TargetRegistered?.Invoke(normalizedKey);
             }
         }
 
@@ -81,6 +86,38 @@ namespace GameFramework.Core
             }
 
             return null;
+        }
+
+        public static void GetRegisteredKeys(List<string> keys)
+        {
+            if (keys == null)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<string, List<GuideTarget>> pair in Targets)
+            {
+                List<GuideTarget> list = pair.Value;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    GuideTarget target = list[i];
+                    if (target != null && target.isActiveAndEnabled)
+                    {
+                        keys.Add(pair.Key);
+                        break;
+                    }
+                }
+            }
+        }
+
+        public static void NotifyClicked(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return;
+            }
+
+            TargetClicked?.Invoke(NormalizeKey(key));
         }
 
         public static void Clear()

@@ -4,37 +4,35 @@ using System.Collections.Generic;
 namespace GameFramework.Core
 {
     [Serializable]
-    public class GuideDefinition
+    public sealed class GuideDefinition
     {
         public int id;
         public string groupId;
         public int order;
-        public string trigger;
-        public GuideStepType type = GuideStepType.Dialog;
-        public string prerequisiteIds;
         public int nextId;
+
+        public string prerequisiteIds;
+        public string trigger;
+        public string triggerConditions;
+        public string startConditions;
+        public string skipConditions;
+
+        public string action;
+        public string completion;
 
         public string targetKey;
         public string titleKey;
         public string textKey;
         public string title;
         public string content;
-        public string completeEvent;
-        public string customKey;
-        public string param;
 
         public bool canSkip = true;
         public bool blockInput = true;
         public bool showContinueButton = true;
-        public bool autoCompleteOnShow;
-        public bool completeOnTargetClick;
-        public float autoCompleteDelay;
 
         public string GroupKey => string.IsNullOrWhiteSpace(groupId) ? id.ToString() : groupId.Trim();
         public string TriggerKey => string.IsNullOrWhiteSpace(trigger) ? string.Empty : trigger.Trim();
-        public string CompleteEventKey => string.IsNullOrWhiteSpace(completeEvent) ? string.Empty : completeEvent.Trim();
         public string TargetKey => string.IsNullOrWhiteSpace(targetKey) ? string.Empty : targetKey.Trim();
-
         public bool HasExplicitNext => nextId > 0;
 
         public IEnumerable<int> EnumeratePrerequisiteIds()
@@ -54,21 +52,50 @@ namespace GameFramework.Core
             }
         }
 
-        public bool ShouldCompleteByEvent(string eventKey)
+        public IEnumerable<GuideConfigExpression> EnumerateTriggerConditions()
         {
-            return !string.IsNullOrEmpty(CompleteEventKey) &&
-                   string.Equals(CompleteEventKey, eventKey, StringComparison.Ordinal);
+            return GuideConfigExpression.ParseList(triggerConditions);
         }
 
-        public bool ShouldCompleteByTargetClick(string clickedTargetKey)
+        public IEnumerable<GuideConfigExpression> EnumerateStartConditions()
         {
-            if (!completeOnTargetClick)
+            if (!string.IsNullOrWhiteSpace(startConditions))
             {
-                return false;
+                List<GuideConfigExpression> expressions = GuideConfigExpression.ParseList(startConditions);
+                for (int i = 0; i < expressions.Count; i++)
+                {
+                    yield return expressions[i];
+                }
             }
 
-            return !string.IsNullOrEmpty(TargetKey) &&
-                   string.Equals(TargetKey, clickedTargetKey, StringComparison.Ordinal);
+            foreach (int prerequisiteId in EnumeratePrerequisiteIds())
+            {
+                yield return new GuideConfigExpression("StepFinished", prerequisiteId.ToString());
+            }
+        }
+
+        public IEnumerable<GuideConfigExpression> EnumerateSkipConditions()
+        {
+            return GuideConfigExpression.ParseList(skipConditions);
+        }
+
+        public IEnumerable<GuideConfigExpression> EnumerateActions()
+        {
+            List<GuideConfigExpression> expressions = GuideConfigExpression.ParseList(action);
+            for (int i = 0; i < expressions.Count; i++)
+            {
+                yield return expressions[i];
+            }
+        }
+
+        public GuideConfigExpression CompletionExpression
+        {
+            get
+            {
+                return GuideConfigExpression.TryParse(completion, out GuideConfigExpression expression)
+                    ? expression
+                    : new GuideConfigExpression("Manual", string.Empty);
+            }
         }
     }
 

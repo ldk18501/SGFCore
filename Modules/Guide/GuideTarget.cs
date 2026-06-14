@@ -53,11 +53,7 @@ namespace GameFramework.Core
                 return;
             }
 
-            GuideModule module = GameApp.Guide;
-            if (module != null)
-            {
-                module.NotifyTargetClicked(_targetKey);
-            }
+            GuideTargetRegistry.NotifyClicked(_targetKey);
         }
     }
 }

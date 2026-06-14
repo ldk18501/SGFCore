@@ -1,208 +1,174 @@
-# Guide 新手引导模块使用说明
+# Guide 引导模块
 
-Guide 模块是 SGFCore 的配置驱动新手引导系统。它不再使用“最大引导索引”判断进度，而是精确保存每一个步骤 ID 的完成/跳过状态，避免先完成大 ID 后误判小 ID 已完成的问题。进度通过 `SaveModule` 写入统一存档文件，不再依赖 `PlayerPrefs`。
+Guide 是 SGFCore 的配置驱动引导系统。正式项目接入后，业务层只需要在启动阶段调用一次 `StartGuide`；后续引导什么时候触发、是否满足条件、执行什么表现、如何完成，都由配置表和项目侧注册的 Trigger / Condition / Action 决定。
 
-## 设计目标
+这个模块不再兼容旧的手动触发式 API。旧 GuideModule 的设计问题是业务代码需要到处调用引导方法，新设计改为：业务代码只广播自己的业务事件，Guide 通过安装器监听这些事件并按配置自动判断。
 
-- 配表维护主流程，引导步骤可以按 `groupId + order` 组成链，也可以用 `nextId` 指定下一步。
-- 每个步骤精确记录完成状态：`IsStepCompleted(id)` 只判断这个 ID 本身。
-- 业务层只广播事件或调用触发 API，不需要把 UI、玩法系统和引导模块互相写死。
-- 表现层通过 `IGuideView` 接入，默认提供一个简单的 `GuideOverlayView`，项目可以替换成更完整的遮罩、挖洞、高亮、箭头和对白表现。
-- 支持对白、目标高亮、强制点击、等待事件、等待 UI、延迟、自定义步骤。
-
-## 初始化
-
-`FrameworkEntry` 已默认注册：
+## 启动方式
 
 ```csharp
-RegisterModule(new GuideModule());
-```
-
-业务层通过 `GameApp.Guide` 访问：
-
-```csharp
-GameApp.Guide.SetSaveOptions("Guide", useEncryption: true);
-```
-
-如果不调用 `SetSaveOptions`，默认存档名为 `Guide`，并使用 `SaveModule` 的加密参数。
-
-## 配置字段建议
-
-推荐在 Excel 中建立 `GuideConf`，字段可以按下面设计。生成出的配置类再映射成 `GuideDefinition` 注册到模块。
-
-模块目录下提供了可直接参考的示例表：[Example](Example/README.md)。
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | `int` | 步骤唯一 ID。 |
-| `groupId` | `string` | 引导链 ID，例如 `MainCity`、`DailyTask`。为空时会把当前步骤视作独立组。 |
-| `order` | `int` | 组内顺序。未填写 `nextId` 时，完成后自动找同组下一个可开始步骤。 |
-| `trigger` | `string` | 触发键，例如 `EnterMainCity`、`UI:MainForm`。 |
-| `type` | `enum_GuideStepType` | 步骤类型：`Dialog`、`Highlight`、`ForceClick`、`WaitEvent`、`WaitUI`、`Delay`、`Custom`。 |
-| `prerequisiteIds` | `string` | 前置步骤 ID，支持 `1001,1002`。 |
-| `nextId` | `int` | 显式下一步 ID，填 0 则按组内顺序推进。 |
-| `targetKey` | `string` | 目标 UI/物体 key，对应场景中的 `GuideTarget`。 |
-| `titleKey` / `textKey` | `string` | 多语言 key。为空时使用 `title` / `content`。 |
-| `title` / `content` | `string` | 兜底文本或临时调试文本。 |
-| `completeEvent` | `string` | 等待事件步骤的完成事件。 |
-| `canSkip` | `bool` | 是否允许跳过。 |
-| `blockInput` | `bool` | 引导展示时是否阻挡输入。 |
-| `showContinueButton` | `bool` | 是否显示继续按钮。 |
-| `autoCompleteOnShow` | `bool` | 展示后立刻完成，适合纯标记步骤。 |
-| `completeOnTargetClick` | `bool` | 目标被点击后完成，适合强制点击。 |
-| `autoCompleteDelay` | `float` | 延迟自动完成秒数。 |
-| `customKey` / `param` | `string` | 自定义表现或业务参数。 |
-
-注册示例：
-
-```csharp
-GameApp.Guide.RegisterDefinitions(new[]
+GuideStartOptions options = new GuideStartOptions
 {
-    new GuideDefinition
+    Definitions = GuideTableAdapter.ToDefinitions(GuideConf.List),
+    View = guideOverlayView,
+    SaveName = "Guide",
+    ValidateOnStart = true
+};
+
+options.Installers.Add(new RpgGuideInstaller());
+options.Installers.Add(new UiGuideInstaller());
+
+GameApp.Guide.StartGuide(options);
+```
+
+项目代码不需要修改 SGFCore。正式项目把自己的扩展写在项目工程中，例如：
+
+```csharp
+public sealed class RpgGuideInstaller : IGuideInstaller
+{
+    public void Install(IGuideRegistry registry)
     {
-        id = 1001,
-        groupId = "MainCity",
-        order = 1,
-        trigger = "EnterMainCity",
-        type = GuideStepType.Dialog,
-        textKey = "guide_main_city_1001",
-        showContinueButton = true
-    },
-    new GuideDefinition
-    {
-        id = 1002,
-        groupId = "MainCity",
-        order = 2,
-        type = GuideStepType.ForceClick,
-        targetKey = "MainCity.BuildButton",
-        completeOnTargetClick = true,
-        showContinueButton = false
+        registry.RegisterTrigger(
+            "PlayerLevelUp",
+            new GuideEventTrigger<PlayerLevelUpEvent>(
+                "PlayerLevelUp",
+                payloadFactory: e => e,
+                parametersFactory: e => new Dictionary<string, string>
+                {
+                    { "level", e.Level.ToString() }
+                }));
+
+        registry.RegisterCondition("MenuClosed", (context, parameter) =>
+            !GameApp.UI.IsOpen(parameter));
+
+        registry.RegisterAction("ShowBlackCircleMask", (context, parameter) =>
+            MyGuideMask.ShowCircle(context.ViewContext.Target, parameter));
     }
-});
-```
-
-如果使用配置表生成类，可以用转换函数批量注册：
-
-```csharp
-GameApp.Guide.RegisterDefinitions(GuideConf.List, row => new GuideDefinition
-{
-    id = row.id,
-    groupId = row.groupId,
-    order = row.order,
-    trigger = row.trigger,
-    type = row.type,
-    targetKey = row.targetKey,
-    textKey = row.textKey,
-    prerequisiteIds = row.prerequisiteIds,
-    nextId = row.nextId,
-    canSkip = row.canSkip,
-    blockInput = row.blockInput,
-    showContinueButton = row.showContinueButton,
-    autoCompleteDelay = row.autoCompleteDelay,
-    completeEvent = row.completeEvent,
-    completeOnTargetClick = row.completeOnTargetClick
-});
-```
-
-## 触发引导
-
-直接触发：
-
-```csharp
-GameApp.Guide.TryStartByTrigger("EnterMainCity");
-```
-
-事件触发：
-
-```csharp
-GameApp.Broadcast(new GuideSignalEvent("EnterMainCity"));
-```
-
-UI 打开时可以约定使用 `UI:` 前缀：
-
-```csharp
-GameApp.Guide.NotifyUIOpened("MainForm"); // 等价于事件 key: UI:MainForm
-```
-
-等待事件步骤完成：
-
-```csharp
-GameApp.Guide.NotifyEvent("PlayerClickedBuild");
-// 或
-GameApp.Broadcast(new GuideSignalEvent("PlayerClickedBuild"));
-```
-
-## UI 目标绑定
-
-给需要被引导指向的按钮或节点挂 `GuideTarget`：
-
-```csharp
-// Inspector 中填写 targetKey:
-// MainCity.BuildButton
-```
-
-当配置中的 `targetKey` 与 `GuideTarget.TargetKey` 一致时，`GuideOverlayView` 会自动定位高亮框。如果步骤设置了 `completeOnTargetClick = true`，点击该目标会完成当前步骤。
-
-## 引导表现层
-
-默认表现层是 `GuideOverlayView`，适合快速 Demo 和功能验证。把它挂到引导遮罩 UI 上，然后注册：
-
-```csharp
-GuideOverlayView view = guideOverlay.GetComponent<GuideOverlayView>();
-GameApp.Guide.SetView(view);
-```
-
-正式项目如果需要挖洞遮罩、箭头动画、手指动画、对话角色等，可以自己实现：
-
-```csharp
-public sealed class MyGuideView : MonoBehaviour, IGuideView
-{
-    public bool IsShowing { get; private set; }
-
-    public void Show(GuideViewContext context) {}
-    public void RefreshTarget(GuideViewContext context) {}
-    public void Hide() {}
 }
 ```
 
-## 进度接口
+业务层仍然只做自己的事：
 
 ```csharp
-bool done = GameApp.Guide.IsStepCompleted(1001);
-bool skipped = GameApp.Guide.IsStepSkipped(1001);
-bool finished = GameApp.Guide.IsStepFinished(1001);
-bool groupDone = GameApp.Guide.IsGuideCompleted("MainCity");
-bool groupFinished = GameApp.Guide.IsGuideFinished("MainCity");
+GameApp.Event.Broadcast(new PlayerLevelUpEvent(2));
 ```
 
-`Completed` 和 `Skipped` 分开保存。模块启动判断使用 `Finished`，所以跳过的步骤不会反复弹出；但你仍然可以精确区分“真的完成”和“被跳过”。
+Guide 会因为 `RpgGuideInstaller` 注册了 `PlayerLevelUp` 触发器而自动收到事件，然后匹配配置表。
 
-调试时可以重置：
+## 配置模型
+
+每一条引导配置由四类信息组成：
+
+| 字段 | 作用 | 示例 |
+| --- | --- | --- |
+| `id` | 引导步骤唯一 id | `2001` |
+| `groupId` | 一组连续引导的分组 | `RpgMain` |
+| `order` | 同组排序 | `1` |
+| `nextId` | 显式下一步，为空或 `0` 时按同组 `order` 推进 | `2002` |
+| `prerequisiteIds` | 前置引导 id，自动转成 `StepFinished(id)` 条件 | `1001;1002` |
+| `trigger` | 唤醒这条引导的触发器 | `PlayerLevelUp` |
+| `triggerConditions` | 对触发事件本身的判断 | `TriggerParam(level>=2)` |
+| `startConditions` | 开始前必须满足的外部状态 | `MenuClosed(SecondMenu);TargetExists(Main.MenuButton)` |
+| `skipConditions` | 满足时自动跳过这条引导 | `GuideFinished(RpgMain)` |
+| `action` | 引导开始后执行的功能 | `ShowBlackCircleMask(radius=96)` |
+| `completion` | 当前步骤如何完成 | `TargetClick(Main.MenuButton)` |
+| `targetKey` | 引导目标对象 key | `Main.MenuButton` |
+| `titleKey/textKey` | 本地化 key | `guide_open_menu_title` |
+| `title/content` | 无本地化时的兜底文本 | `打开主菜单` |
+| `canSkip` | 是否允许表现层手动跳过 | `true` |
+| `blockInput` | 表现层是否阻挡输入 | `true` |
+| `showContinueButton` | 是否显示继续按钮 | `false` |
+
+`triggerConditions`、`startConditions`、`skipConditions`、`action` 使用统一表达式：
+
+```text
+Name(param)
+Name:param
+NameA(foo);NameB(bar)
+```
+
+## 内置能力
+
+内置条件：
+
+| 条件 | 说明 |
+| --- | --- |
+| `Always` / `Never` | 永远通过或永远不通过 |
+| `StepFinished(1001)` | 某步骤已完成或已跳过 |
+| `StepCompleted(1001)` | 某步骤真实完成 |
+| `StepSkipped(1001)` | 某步骤被跳过 |
+| `StepNotFinished(1001)` | 某步骤还未完成也未跳过 |
+| `GuideFinished(RpgMain)` | 某组引导全部结束 |
+| `TargetExists(Main.MenuButton)` | 当前场景存在对应 `GuideTarget` |
+| `TriggerParam(level>=2)` | 检查触发参数或事件 payload |
+
+内置动作：
+
+| 动作 | 说明 |
+| --- | --- |
+| `Overlay` | 调用当前 `IGuideView` 显示 |
+| `Dialog` | 调用当前 `IGuideView` 显示 |
+| `Highlight` | 调用当前 `IGuideView` 显示 |
+| `ForceClick` | 调用当前 `IGuideView` 显示 |
+| `OverlayCircle` | 调用当前 `IGuideView` 显示 |
+
+这些内置动作只是通用入口。大型项目应在项目侧注册更完整的表现动作，例如挖洞遮罩、圆形遮罩、箭头、手指动画、镜头锁定、剧情暂停等。
+
+完成方式：
+
+| completion | 说明 |
+| --- | --- |
+| `Manual` | 由表现层按钮或项目代码完成 |
+| `TargetClick(key)` | 点击指定 `GuideTarget` 完成 |
+| `Event(key)` | 收到同名触发或 `GuideSignalEvent(key)` 完成 |
+| `Delay(seconds)` | 延迟后完成 |
+| `Auto` / `Immediate` | 动作执行后立即完成 |
+
+## 目标对象
+
+需要被引导指向的 UI 或世界对象挂 `GuideTarget`，填写稳定的 `targetKey`。对象启用时会自动注册，注册会触发：
+
+```text
+Target:{targetKey}
+TargetRegistered
+```
+
+对象被点击时会触发：
+
+```text
+TargetClick:{targetKey}
+TargetClick
+```
+
+因此配置表可以写：
+
+```text
+trigger = Target:Main.MenuButton
+completion = TargetClick(Main.MenuButton)
+```
+
+## 表现层
+
+表现层使用 `IGuideView`：
 
 ```csharp
-GameApp.Guide.ResetStep(1001);
-GameApp.Guide.ResetGroup("MainCity");
-GameApp.Guide.ClearProgress();
+public interface IGuideView
+{
+    bool IsShowing { get; }
+    void Show(GuideViewContext context);
+    void RefreshTarget(GuideViewContext context);
+    void Hide();
+}
 ```
 
-## 引导事件
+`GuideOverlayView` 只是基础示例。正式项目可以完全替换表现层，也可以只把复杂表现做成自定义 Action。
 
-模块会广播以下事件：
+## 校验
+
+`StartGuide` 默认会校验配置是否引用了未注册的条件、动作、未知完成方式、缺失前置 id、缺失 nextId 等问题：
 
 ```csharp
-GuideStartedEvent
-GuideStepStartedEvent
-GuideStepCompletedEvent
-GuideCompletedEvent
-GuideProgressChangedEvent
+List<string> errors = GameApp.Guide.ValidateDefinitions();
 ```
 
-这些事件适合调试面板、埋点、QA 工具和 UI 刷新。普通玩法逻辑尽量只发 `GuideSignalEvent`，不要反向依赖引导内部状态。
-
-## 配置建议
-
-- 每个功能使用独立 `groupId`，不要把所有引导堆成一条大链。
-- `id` 只作为唯一标识，不承担进度大小含义。
-- 主线步骤用 `groupId + order`，分支步骤用 `prerequisiteIds` 和不同 `trigger`。
-- 强制点击步骤建议设置 `showContinueButton = false`、`completeOnTargetClick = true`。
-- `PlayerPrefs` 只适合轻量偏好值，引导进度使用 `SaveModule` 统一保存。
+建议在 Editor 导表流程中也调用同样的校验逻辑，尽早发现配置错误。
