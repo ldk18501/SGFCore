@@ -21,6 +21,19 @@ if (!result.Success)
 }
 ```
 
+需要把资源加载和激活拆开时：
+
+```csharp
+var options = new SceneLoadOptions(
+    LoadSceneMode.Additive,
+    activateOnLoad: false,
+    setAsActiveScene: true);
+SceneLoadResult result = await GameApp.Scene.TryLoadSceneAsync("Scenes/Battle", options, token);
+await GameApp.Scene.ActivateSceneAsync("Scenes/Battle", token);
+```
+
+相同地址和选项的并发加载会合并为同一个任务，模块关闭时会等待已追踪场景卸载。
+
 ## 切换 Single 场景
 
 ```csharp

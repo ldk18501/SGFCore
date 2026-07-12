@@ -65,6 +65,10 @@ GameObject item = await InstantiateAsync("UI/Item", itemRoot);
 
 在 UI 子节点挂 `UITweenElement`，打开/关闭界面时会自动播放入场/退场动画。
 
+重复使用的动画参数可创建 `UITweenProfile` ScriptableObject，并在多个 `UITweenElement` 上引用。元素会在布局完成后捕获位置、缩放和透明度基线，避免重复开关后逐渐漂移。
+
+正式界面数据推荐实现 `IUIFormData` 并继承 `UIFormBase<TData>`，代替无类型 `params object[]`。单例界面的并发打开请求会合并；关闭会取消尚未完成的入场动画并临时关闭射线交互。缓存数量由 `UIConfig.MaxCachedInstances` 控制。
+
 ## UI Binding Editor
 
 UI Binding Editor 用来减少手动拖引用和运行时 `Find`。业务界面脚本需要继承 `UIFormBase`，并声明为 `partial class`：

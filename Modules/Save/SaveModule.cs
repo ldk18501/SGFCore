@@ -12,16 +12,17 @@ namespace GameFramework.Core
     {
         private const string DefaultSlot = "Default";
 
-        private readonly Dictionary<Type, object> _migrations = new Dictionary<Type, object>();
+        private readonly Dictionary<Type, List<object>> _migrations =
+            new Dictionary<Type, List<object>>();
         private readonly Dictionary<SaveDataBase, TrackedSave> _trackedSaves =
             new Dictionary<SaveDataBase, TrackedSave>();
         private readonly HashSet<SaveDataBase> _dirtyBroadcasted = new HashSet<SaveDataBase>();
 
         private FileSystemModule _fileSystem;
         private CryptoModule _crypto;
+        private TimerModule _timer;
         private string _saveDirectory;
 
-        public int Priority => 30;
         public string CurrentSlot { get; private set; } = DefaultSlot;
         public bool EnableBackupOnSave { get; set; } = true;
         public bool EnableCorruptFileQuarantine { get; set; } = true;
@@ -30,6 +31,7 @@ namespace GameFramework.Core
         {
             _fileSystem = FrameworkEntry.Instance.GetModule<FileSystemModule>();
             _crypto = FrameworkEntry.Instance.GetModule<CryptoModule>();
+            _timer = FrameworkEntry.Instance.GetModule<TimerModule>();
 
             if (_fileSystem == null)
             {
@@ -73,6 +75,7 @@ namespace GameFramework.Core
             _trackedSaves.Clear();
             _dirtyBroadcasted.Clear();
             _migrations.Clear();
+            _timer = null;
         }
 
         public void SetCurrentSlot(string slot)
@@ -104,7 +107,25 @@ namespace GameFramework.Core
                 return;
             }
 
-            _migrations[typeof(T)] = migration;
+            Type dataType = typeof(T);
+            if (!_migrations.TryGetValue(dataType, out List<object> migrations))
+            {
+                migrations = new List<object>();
+                _migrations[dataType] = migrations;
+            }
+
+            for (int i = migrations.Count - 1; i >= 0; i--)
+            {
+                if (((ISaveDataMigration<T>)migrations[i]).TargetVersion == migration.TargetVersion)
+                {
+                    migrations.RemoveAt(i);
+                }
+            }
+
+            migrations.Add(migration);
+            migrations.Sort((left, right) =>
+                ((ISaveDataMigration<T>)left).TargetVersion.CompareTo(
+                    ((ISaveDataMigration<T>)right).TargetVersion));
         }
 
         public void TrackAutoSave(string saveName, SaveDataBase saveData, Action saveAction)
@@ -120,14 +141,13 @@ namespace GameFramework.Core
             }
 
             StopAutoSave(saveName, saveData);
-            TimerModule timerModule = FrameworkEntry.Instance.GetModule<TimerModule>();
-            if (timerModule == null)
+            if (_timer == null)
             {
                 return;
             }
 
             string normalizedSlot = NormalizeSlot(slot);
-            saveData.AutoSaveTimerId = timerModule.AddTimer(saveData.AutoSaveInterval, () =>
+            saveData.AutoSaveTimerId = _timer.AddTimer(saveData.AutoSaveInterval, () =>
             {
                 if (!saveData.CheckIsDirty())
                 {
@@ -135,8 +155,6 @@ namespace GameFramework.Core
                 }
 
                 saveAction?.Invoke();
-                saveData.ClearDirty();
-                Log.Info($"[Save] 自动存档完成: slot={normalizedSlot}, save={saveName}");
             }, isUnscaled: true, loopCount: -1);
 
             _trackedSaves[saveData] = new TrackedSave(normalizedSlot, saveName);
@@ -151,7 +169,7 @@ namespace GameFramework.Core
 
             if (saveData.AutoSaveTimerId != 0)
             {
-                FrameworkEntry.Instance.GetModule<TimerModule>()?.CancelTimer(saveData.AutoSaveTimerId);
+                _timer?.CancelTimer(saveData.AutoSaveTimerId);
                 saveData.AutoSaveTimerId = 0;
             }
 
@@ -161,19 +179,38 @@ namespace GameFramework.Core
 
         public void SaveData<T>(string saveName, T saveData, bool useEncryption = true)
         {
-            SaveData(CurrentSlot, saveName, saveData, useEncryption);
+            TrySaveData(CurrentSlot, saveName, saveData, useEncryption);
         }
 
         public void SaveData<T>(string slot, string saveName, T saveData, bool useEncryption = true)
         {
+            TrySaveData(slot, saveName, saveData, useEncryption);
+        }
+
+        public SaveOperationResult TrySaveData<T>(
+            string saveName,
+            T saveData,
+            bool useEncryption = true)
+        {
+            return TrySaveData(CurrentSlot, saveName, saveData, useEncryption);
+        }
+
+        public SaveOperationResult TrySaveData<T>(
+            string slot,
+            string saveName,
+            T saveData,
+            bool useEncryption = true)
+        {
             if (string.IsNullOrWhiteSpace(saveName) || saveData == null)
             {
-                return;
+                return SaveOperationResult.Failed(saveName, string.Empty, "存档名或数据为空。");
             }
 
+            string filePath = string.Empty;
             try
             {
                 string normalizedSlot = NormalizeSlot(slot);
+                filePath = GetSaveFilePath(normalizedSlot, saveName);
                 string moduleName = string.Empty;
                 int version = 0;
                 if (saveData is SaveDataBase saveBase)
@@ -185,20 +222,36 @@ namespace GameFramework.Core
                 }
 
                 string jsonContent = JsonUtility.ToJson(saveData);
-                if (useEncryption && _crypto != null)
+                if (useEncryption)
                 {
-                    jsonContent = _crypto.EncryptString(jsonContent);
+                    if (_crypto == null || !_crypto.IsInitialized)
+                    {
+                        Log.Error($"[Save] 存档失败 ({saveName})：已要求加密，但 CryptoModule 尚未配置密钥。");
+                        return SaveOperationResult.Failed(
+                            saveName,
+                            filePath,
+                            "已要求加密，但 CryptoModule 尚未配置密钥。");
+                    }
+
+                    jsonContent = _crypto.EncryptAuthenticatedString(jsonContent);
                 }
 
-                string filePath = GetSaveFilePath(normalizedSlot, saveName);
                 BackupExistingSave(filePath);
-                _fileSystem.WriteText(filePath, jsonContent);
+                _fileSystem.WriteTextAtomic(filePath, jsonContent);
+                if (saveData is SaveDataBase savedBase)
+                {
+                    savedBase.ClearDirty();
+                    _dirtyBroadcasted.Remove(savedBase);
+                }
+
                 Broadcast(new SaveDataSavedEvent(normalizedSlot, saveName, moduleName, version));
                 Log.Info($"[Save] 存档成功: slot={normalizedSlot}, save={saveName}");
+                return SaveOperationResult.Succeeded(saveName, filePath);
             }
             catch (Exception e)
             {
                 Log.Error($"[Save] 存档失败 ({saveName}): {e.Message}");
+                return SaveOperationResult.Failed(saveName, filePath, e.Message);
             }
         }
 
@@ -211,6 +264,15 @@ namespace GameFramework.Core
         {
             string normalizedSlot = NormalizeSlot(slot);
             string filePath = GetSaveFilePath(normalizedSlot, saveName);
+
+            if (useEncryption && (_crypto == null || !_crypto.IsInitialized))
+            {
+                Log.Error($"[Save] 读档失败 ({saveName})：已要求解密，但 CryptoModule 尚未配置密钥。原文件不会被隔离或覆盖。");
+                T unavailableData = CreateNewData<T>();
+                BindSaveContext(saveName, unavailableData);
+                return unavailableData;
+            }
+
             if (!_fileSystem.Exists(filePath))
             {
                 T newData = CreateNewData<T>();
@@ -356,7 +418,7 @@ namespace GameFramework.Core
                 string fileContent = _fileSystem.ReadText(filePath);
                 if (useEncryption && _crypto != null)
                 {
-                    fileContent = _crypto.DecryptString(fileContent);
+                    fileContent = _crypto.DecryptAuthenticatedString(fileContent);
                     if (string.IsNullOrEmpty(fileContent))
                     {
                         error = "解密结果为空。";
@@ -472,20 +534,31 @@ namespace GameFramework.Core
 
         private void ApplyMigration<T>(T data, int fromVersion, string slot, string saveName) where T : new()
         {
-            if (data == null || !_migrations.TryGetValue(typeof(T), out object migrationObject))
+            if (data == null ||
+                !_migrations.TryGetValue(typeof(T), out List<object> migrationObjects))
             {
                 return;
             }
 
-            if (migrationObject is ISaveDataMigration<T> migration && migration.TargetVersion > fromVersion)
+            int currentVersion = fromVersion;
+            for (int i = 0; i < migrationObjects.Count; i++)
             {
-                migration.Migrate(data, fromVersion);
-                if (data is SaveDataBase saveBase)
+                if (!(migrationObjects[i] is ISaveDataMigration<T> migration) ||
+                    migration.TargetVersion <= currentVersion)
                 {
-                    saveBase.SaveVersion = migration.TargetVersion;
+                    continue;
                 }
 
-                Broadcast(new SaveDataMigratedEvent(slot, saveName, fromVersion, migration.TargetVersion));
+                int previousVersion = currentVersion;
+                migration.Migrate(data, previousVersion);
+                currentVersion = migration.TargetVersion;
+                if (data is SaveDataBase saveBase)
+                {
+                    saveBase.SaveVersion = currentVersion;
+                    saveBase.MarkDirty();
+                }
+
+                Broadcast(new SaveDataMigratedEvent(slot, saveName, previousVersion, currentVersion));
             }
         }
 
@@ -539,6 +612,32 @@ namespace GameFramework.Core
                 Slot = slot;
                 SaveName = saveName;
             }
+        }
+    }
+
+    public readonly struct SaveOperationResult
+    {
+        private SaveOperationResult(bool success, string saveName, string filePath, string error)
+        {
+            Success = success;
+            SaveName = saveName;
+            FilePath = filePath;
+            Error = error;
+        }
+
+        public bool Success { get; }
+        public string SaveName { get; }
+        public string FilePath { get; }
+        public string Error { get; }
+
+        public static SaveOperationResult Succeeded(string saveName, string filePath)
+        {
+            return new SaveOperationResult(true, saveName, filePath, null);
+        }
+
+        public static SaveOperationResult Failed(string saveName, string filePath, string error)
+        {
+            return new SaveOperationResult(false, saveName, filePath, error);
         }
     }
 }

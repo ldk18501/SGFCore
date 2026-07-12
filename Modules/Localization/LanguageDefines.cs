@@ -33,5 +33,6 @@ namespace GameFramework.Core
         public SystemLanguageType RequestedLanguage;
         public SystemLanguageType NewLanguage;
         public bool IsFallback;
+        public string CultureName;
     }
 }

@@ -11,8 +11,6 @@ namespace GameFramework.Core
     /// </summary>
     public class ConfigModule : IFrameworkModule
     {
-        public int Priority => 45;
-
         private readonly Dictionary<string, ConfigRegistration> _loadMap =
             new Dictionary<string, ConfigRegistration>();
 

@@ -77,6 +77,7 @@ namespace GameFramework.Core
             public bool IsSingleton;
             public bool IsAborted;
             public float BaseVolume;
+            public int Priority;
 
             public AudioHandle Handle => new AudioHandle(TaskId, Group, Address);
 
@@ -100,6 +101,7 @@ namespace GameFramework.Core
                 IsSingleton = false;
                 IsAborted = false;
                 BaseVolume = 1f;
+                Priority = 0;
             }
         }
 
@@ -120,13 +122,13 @@ namespace GameFramework.Core
             public bool StopWhenDone;
         }
 
-        public int Priority => 60;
-
         private readonly Queue<AudioSource> _sourcePool = new Queue<AudioSource>();
         private readonly List<AudioTask> _activeTasks = new List<AudioTask>();
         private readonly Dictionary<long, AudioTask> _taskMap = new Dictionary<long, AudioTask>();
         private readonly Dictionary<string, AudioTask> _singletonMap = new Dictionary<string, AudioTask>();
         private readonly Dictionary<AudioGroup, GroupState> _groups = new Dictionary<AudioGroup, GroupState>();
+        private readonly Dictionary<AudioGroup, UnityEngine.Audio.AudioMixerGroup> _mixerGroups =
+            new Dictionary<AudioGroup, UnityEngine.Audio.AudioMixerGroup>();
 
         private Transform _audioRoot;
         private AudioSource _bgmSource;
@@ -142,6 +144,8 @@ namespace GameFramework.Core
         public float SFXVolume => GetGroupVolume(AudioGroup.SFX);
         public bool IsBgmPlaying => _bgmSource != null && _bgmSource.isPlaying;
         public int ActiveSfxCount => _activeTasks.Count;
+        public int MaxConcurrentSfx { get; set; } = 32;
+        public bool PersistVolumeSettings { get; set; } = true;
 
         public void OnInit()
         {
@@ -149,7 +153,7 @@ namespace GameFramework.Core
 
             foreach (AudioGroup group in Enum.GetValues(typeof(AudioGroup)))
             {
-                _groups[group] = new GroupState { Volume = 1f, Muted = false, Paused = false };
+                _groups[group] = LoadGroupState(group);
             }
 
             GameObject rootGO = new GameObject("[Framework_AudioRoot]");
@@ -160,6 +164,7 @@ namespace GameFramework.Core
             _bgmSource.loop = true;
             _bgmSource.playOnAwake = false;
             _bgmSource.spatialBlend = 0f;
+            ApplyMixerGroup(_bgmSource, AudioGroup.BGM);
 
             Log.Module("Audio", "音频模块初始化完成。");
         }
@@ -201,6 +206,12 @@ namespace GameFramework.Core
             {
                 _lifecycleCts.Dispose();
                 _lifecycleCts = null;
+            }
+
+            _mixerGroups.Clear();
+            if (PersistVolumeSettings)
+            {
+                PlayerPrefs.Save();
             }
         }
 
@@ -308,9 +319,10 @@ namespace GameFramework.Core
             bool isSingleton = false,
             float pitchRange = 0f,
             float minDistance = 1f,
-            float maxDistance = 50f)
+            float maxDistance = 50f,
+            int priority = 0)
         {
-            return PlaySFXEx(address, AudioGroup.SFX, is3D, position, loop, isSingleton, pitchRange, 1f, minDistance, maxDistance).Id;
+            return PlaySFXEx(address, AudioGroup.SFX, is3D, position, loop, isSingleton, pitchRange, 1f, minDistance, maxDistance, priority).Id;
         }
 
         public long PlaySFX(
@@ -320,7 +332,8 @@ namespace GameFramework.Core
             bool isSingleton = false,
             float pitchRange = 0f,
             float minDistance = 1f,
-            float maxDistance = 50f)
+            float maxDistance = 50f,
+            int priority = 0)
         {
             AudioHandle handle = PlaySFXEx(
                 address,
@@ -332,7 +345,8 @@ namespace GameFramework.Core
                 pitchRange,
                 1f,
                 minDistance,
-                maxDistance);
+                maxDistance,
+                priority);
 
             if (_taskMap.TryGetValue(handle.Id, out AudioTask task))
             {
@@ -352,7 +366,8 @@ namespace GameFramework.Core
             float pitchRange = 0f,
             float volume = 1f,
             float minDistance = 1f,
-            float maxDistance = 50f)
+            float maxDistance = 50f,
+            int priority = 0)
         {
             if (string.IsNullOrWhiteSpace(address))
             {
@@ -366,6 +381,12 @@ namespace GameFramework.Core
                 return existingTask.Handle;
             }
 
+            if (!EnsureVoiceCapacity(priority))
+            {
+                Log.Warning($"[Audio] 达到最大并发声道且没有可抢占语音: {address}");
+                return default;
+            }
+
             long taskId = _nextAudioId++;
             AudioTask task = GameApp.Pool.AllocateClass<AudioTask>();
             task.TaskId = taskId;
@@ -373,6 +394,7 @@ namespace GameFramework.Core
             task.Group = group == AudioGroup.Master ? AudioGroup.SFX : group;
             task.IsSingleton = isSingleton;
             task.BaseVolume = Mathf.Clamp01(volume);
+            task.Priority = priority;
             task.Source = GetAudioSource();
             ConfigureSource(task.Source, task, is3D, position, loop, pitchRange, minDistance, maxDistance);
 
@@ -510,6 +532,7 @@ namespace GameFramework.Core
             state.Volume = Mathf.Clamp01(volume);
             _groups[group] = state;
             RefreshGroupVolumes();
+            SaveGroupState(group, state);
             Broadcast(new AudioVolumeChangedEvent(group, state.Volume, state.Muted));
         }
 
@@ -524,6 +547,7 @@ namespace GameFramework.Core
             state.Muted = muted;
             _groups[group] = state;
             RefreshGroupVolumes();
+            SaveGroupState(group, state);
             Broadcast(new AudioVolumeChangedEvent(group, state.Volume, state.Muted));
         }
 
@@ -607,6 +631,32 @@ namespace GameFramework.Core
             source.loop = loop;
             source.volume = GetEffectiveVolume(task.Group, task.BaseVolume);
             source.pitch = 1f + Random.Range(-pitchRange, pitchRange);
+            ApplyMixerGroup(source, task.Group);
+        }
+
+        public void SetMixerGroup(AudioGroup group, UnityEngine.Audio.AudioMixerGroup mixerGroup)
+        {
+            if (mixerGroup == null)
+            {
+                _mixerGroups.Remove(group);
+            }
+            else
+            {
+                _mixerGroups[group] = mixerGroup;
+            }
+
+            if (group == AudioGroup.BGM && _bgmSource != null)
+            {
+                ApplyMixerGroup(_bgmSource, AudioGroup.BGM);
+            }
+
+            for (int i = 0; i < _activeTasks.Count; i++)
+            {
+                if (_activeTasks[i].Group == group && _activeTasks[i].Source != null)
+                {
+                    ApplyMixerGroup(_activeTasks[i].Source, group);
+                }
+            }
         }
 
         private void ReplayTask(AudioTask task, float pitchRange)
@@ -636,6 +686,79 @@ namespace GameFramework.Core
             GameObject node = new GameObject("AudioNode");
             node.transform.SetParent(_audioRoot);
             return node.AddComponent<AudioSource>();
+        }
+
+        private bool EnsureVoiceCapacity(int incomingPriority)
+        {
+            int limit = Mathf.Max(1, MaxConcurrentSfx);
+            while (_activeTasks.Count >= limit)
+            {
+                int candidateIndex = -1;
+                int candidatePriority = int.MaxValue;
+                for (int i = 0; i < _activeTasks.Count; i++)
+                {
+                    AudioTask candidate = _activeTasks[i];
+                    if (candidate.Source != null && candidate.Source.loop)
+                    {
+                        continue;
+                    }
+
+                    if (candidate.Priority < candidatePriority)
+                    {
+                        candidatePriority = candidate.Priority;
+                        candidateIndex = i;
+                    }
+                }
+
+                if (candidateIndex < 0 || candidatePriority > incomingPriority)
+                {
+                    return false;
+                }
+
+                RemoveTaskAt(candidateIndex, "VoiceStolen");
+            }
+
+            return true;
+        }
+
+        private void ApplyMixerGroup(AudioSource source, AudioGroup group)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            source.outputAudioMixerGroup = _mixerGroups.TryGetValue(group, out UnityEngine.Audio.AudioMixerGroup mixerGroup)
+                ? mixerGroup
+                : null;
+        }
+
+        private GroupState LoadGroupState(AudioGroup group)
+        {
+            if (!PersistVolumeSettings)
+            {
+                return new GroupState { Volume = 1f };
+            }
+
+            string keyPrefix = $"SGFCore.Audio.{group}";
+            return new GroupState
+            {
+                Volume = PlayerPrefs.GetFloat(keyPrefix + ".Volume", 1f),
+                Muted = PlayerPrefs.GetInt(keyPrefix + ".Muted", 0) != 0,
+                Paused = false
+            };
+        }
+
+        private void SaveGroupState(AudioGroup group, GroupState state)
+        {
+            if (!PersistVolumeSettings)
+            {
+                return;
+            }
+
+            string keyPrefix = $"SGFCore.Audio.{group}";
+            PlayerPrefs.SetFloat(keyPrefix + ".Volume", state.Volume);
+            PlayerPrefs.SetInt(keyPrefix + ".Muted", state.Muted ? 1 : 0);
         }
 
         private void RemoveTaskAt(int index, string state)

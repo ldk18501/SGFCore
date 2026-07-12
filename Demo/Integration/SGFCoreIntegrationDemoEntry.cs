@@ -1,4 +1,5 @@
 using Cysharp.Threading.Tasks;
+using System.Threading;
 using GameFramework.Core.UI;
 using UnityEngine;
 
@@ -16,17 +17,27 @@ namespace GameFramework.Core.Demo
 
         [SerializeField] private string _netImageFileUrl;
 
-        private async void Start()
+        private void Start()
+        {
+            StartAsync(this.GetCancellationTokenOnDestroy()).Forget(Debug.LogException);
+        }
+
+        private async UniTask StartAsync(CancellationToken cancellationToken)
         {
             Application.runInBackground = true;
             Application.targetFrameRate = 60;
 
             Debug.Log("[SGFCoreDemo] Boot begin.");
 
-            FrameworkEntry.Instance.InitFrameworkModules();
+            bool initialized = await FrameworkEntry.Instance.InitFrameworkModulesAsync(
+                cancellationToken: cancellationToken);
+            if (!initialized)
+            {
+                Debug.LogError("[SGFCoreDemo] Framework initialization failed or was canceled.");
+                return;
+            }
 
-            bool resourceReady = await GameApp.Res.EnsureInitializedAsync();
-            Debug.Log($"[SGFCoreDemo] Resource ready: {resourceReady}");
+            Debug.Log("[SGFCoreDemo] Framework and Addressables are ready.");
 
             TestSaveModule();
             await TestConfigModule();

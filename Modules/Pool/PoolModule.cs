@@ -12,6 +12,12 @@ namespace GameFramework.Core
         void Clear();
     }
 
+    public interface IPoolable
+    {
+        void OnSpawned();
+        void OnDespawned();
+    }
+
     /// <summary>
     /// 池配置
     /// </summary>
@@ -26,14 +32,13 @@ namespace GameFramework.Core
     /// </summary>
     public class PoolModule : IFrameworkModule
     {
-        public int Priority => 15; // 优先级较高，在 Timer 之前初始化
-
         // --- C# 类内存池 ---
         private readonly Dictionary<Type, Queue<IReference>> _classPools = new Dictionary<Type, Queue<IReference>>();
 
         // --- GameObject 对象池 ---
         private readonly Dictionary<string, Queue<GameObject>> _gameObjectPools = new Dictionary<string, Queue<GameObject>>();
         private readonly Dictionary<string, PoolConfig> _poolConfigs = new Dictionary<string, PoolConfig>();
+        private readonly Dictionary<string, int> _poolPrefabIds = new Dictionary<string, int>();
         private Transform _poolRoot; // 场景中存放回收对象的根节点
 
         public void OnInit()
@@ -98,6 +103,21 @@ namespace GameFramework.Core
 
         public GameObject SpawnGameObject(string poolName, GameObject prefab, Transform parent = null)
         {
+            if (string.IsNullOrWhiteSpace(poolName) || prefab == null)
+            {
+                Log.Error("[Pool] SpawnGameObject 需要有效的 poolName 和 prefab。");
+                return null;
+            }
+
+            int prefabId = prefab.GetInstanceID();
+            if (_poolPrefabIds.TryGetValue(poolName, out int registeredPrefabId) &&
+                registeredPrefabId != prefabId)
+            {
+                Log.Error($"[Pool] 池 {poolName} 已绑定其他 Prefab，拒绝混入 {prefab.name}。");
+                return null;
+            }
+
+            _poolPrefabIds[poolName] = prefabId;
             if (_gameObjectPools.TryGetValue(poolName, out var pool))
             {
                 while (pool.Count > 0)
@@ -110,6 +130,7 @@ namespace GameFramework.Core
                         go.transform.localRotation = Quaternion.identity;
                         go.transform.localScale = Vector3.one;
                         go.SetActive(true);
+                        NotifySpawned(go);
                         return go;
                     }
                 }
@@ -118,6 +139,7 @@ namespace GameFramework.Core
             // 池中没有，实例化一个新的
             GameObject newObj = UnityEngine.Object.Instantiate(prefab, parent);
             newObj.name = prefab.name;
+            NotifySpawned(newObj);
             return newObj;
         }
 
@@ -136,6 +158,8 @@ namespace GameFramework.Core
                 Log.Warning($"[Pool] 重复回收 GameObject 已忽略: pool={poolName}, object={go.name}");
                 return;
             }
+
+            NotifyDespawned(go);
 
             if (_poolConfigs.TryGetValue(poolName, out var config) && pool.Count >= config.MaxCapacity)
             {
@@ -180,6 +204,8 @@ namespace GameFramework.Core
                 }
                 _gameObjectPools.Remove(poolName);
             }
+
+            _poolPrefabIds.Remove(poolName);
         }
 
         public void ClearAllGameObjectPools()
@@ -201,6 +227,30 @@ namespace GameFramework.Core
             }
 
             return false;
+        }
+
+        private static void NotifySpawned(GameObject instance)
+        {
+            MonoBehaviour[] behaviours = instance.GetComponentsInChildren<MonoBehaviour>(true);
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                if (behaviours[i] is IPoolable poolable)
+                {
+                    poolable.OnSpawned();
+                }
+            }
+        }
+
+        private static void NotifyDespawned(GameObject instance)
+        {
+            MonoBehaviour[] behaviours = instance.GetComponentsInChildren<MonoBehaviour>(true);
+            for (int i = 0; i < behaviours.Length; i++)
+            {
+                if (behaviours[i] is IPoolable poolable)
+                {
+                    poolable.OnDespawned();
+                }
+            }
         }
     }
 }

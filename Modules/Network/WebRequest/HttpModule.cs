@@ -24,6 +24,9 @@ namespace GameFramework.Core
         public int Timeout = -1;
         public int RetryCount = -1;
         public float RetryDelay = -1f;
+        public bool RetryNonIdempotent;
+        public bool UseExponentialBackoff = true;
+        [Range(0f, 1f)] public float RetryJitter = 0.2f;
         public readonly Dictionary<string, string> Headers = new Dictionary<string, string>();
     }
 
@@ -80,20 +83,26 @@ namespace GameFramework.Core
     /// <summary>
     /// 项目级 HTTP 模块：统一结果、错误类型、重试、取消、公共 Header 和超时策略。
     /// </summary>
-    public class HttpModule : IFrameworkModule
+    public class HttpModule : IAsyncFrameworkModule
     {
         private readonly Dictionary<string, string> _defaultHeaders = new Dictionary<string, string>();
 
-        public int Priority => 90;
         public int DefaultTimeout { get; set; } = 10;
         public int DefaultRetryCount { get; set; } = 0;
         public float DefaultRetryDelay { get; set; } = 0.25f;
 
         private string _authorizationToken = string.Empty;
+        private CancellationTokenSource _lifecycleCts;
 
         public void OnInit()
         {
+            _lifecycleCts = new CancellationTokenSource();
             Log.Module("Http", "网络请求模块初始化完成。");
+        }
+
+        public UniTask OnInitAsync(CancellationToken cancellationToken)
+        {
+            return UniTask.CompletedTask;
         }
 
         public void OnUpdate(float deltaTime, float unscaledDeltaTime)
@@ -102,7 +111,17 @@ namespace GameFramework.Core
 
         public void OnDestroy()
         {
+            _lifecycleCts?.Cancel();
+            _lifecycleCts?.Dispose();
+            _lifecycleCts = null;
             _defaultHeaders.Clear();
+            _authorizationToken = string.Empty;
+        }
+
+        public UniTask OnDestroyAsync(CancellationToken cancellationToken)
+        {
+            _lifecycleCts?.Cancel();
+            return UniTask.CompletedTask;
         }
 
         public void SetAuthToken(string token)
@@ -191,39 +210,77 @@ namespace GameFramework.Core
         {
             options ??= new HttpRequestOptions();
             int retryCount = options.RetryCount >= 0 ? options.RetryCount : DefaultRetryCount;
+            if (!string.Equals(method, UnityWebRequest.kHttpVerbGET, StringComparison.OrdinalIgnoreCase) &&
+                !options.RetryNonIdempotent)
+            {
+                retryCount = 0;
+            }
+
             float retryDelay = options.RetryDelay >= 0f ? options.RetryDelay : DefaultRetryDelay;
             HttpResult<T> lastResult = default;
 
-            for (int attempt = 0; attempt <= retryCount; attempt++)
+            using (CancellationTokenSource linkedCts = _lifecycleCts != null
+                       ? CancellationTokenSource.CreateLinkedTokenSource(
+                           cancellationToken,
+                           _lifecycleCts.Token)
+                       : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
-                using (UnityWebRequest request = requestFactory.Invoke())
-                {
-                    SetupRequest(request, options);
+                CancellationToken requestToken = linkedCts.Token;
 
-                    try
-                    {
-                        await request.SendWebRequest().ToUniTask(cancellationToken: cancellationToken);
-                        lastResult = BuildResult(request, url, customParser);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), "请求已取消。", HttpErrorType.Canceled);
-                    }
-                    catch (Exception e)
-                    {
-                        lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), e.Message, Classify(request));
-                    }
-                }
-
-                if (lastResult.Success || lastResult.ErrorType == HttpErrorType.Canceled || attempt >= retryCount)
+                for (int attempt = 0; attempt <= retryCount; attempt++)
                 {
-                    Broadcast(method, lastResult);
-                    return lastResult;
-                }
+                    using (UnityWebRequest request = requestFactory.Invoke())
+                    {
+                        SetupRequest(request, options);
 
-                if (retryDelay > 0f)
-                {
-                    await UniTask.Delay(TimeSpan.FromSeconds(retryDelay), ignoreTimeScale: true, cancellationToken: cancellationToken);
+                        try
+                        {
+                            await request.SendWebRequest().ToUniTask(cancellationToken: requestToken);
+                            lastResult = BuildResult(request, url, customParser);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), "请求已取消。", HttpErrorType.Canceled);
+                        }
+                        catch (Exception e)
+                        {
+                            lastResult = HttpResult<T>.Failed(request.responseCode, url, ReadText(request), e.Message, Classify(request));
+                        }
+                    }
+
+                    if (lastResult.Success || !ShouldRetry(lastResult) || attempt >= retryCount)
+                    {
+                        Broadcast(method, lastResult);
+                        return lastResult;
+                    }
+
+                    if (retryDelay > 0f)
+                    {
+                        float multiplier = options.UseExponentialBackoff
+                            ? Mathf.Pow(2f, attempt)
+                            : 1f;
+                        float jitter = Mathf.Clamp01(options.RetryJitter);
+                        float jitterMultiplier = 1f + UnityEngine.Random.Range(-jitter, jitter);
+                        TimeSpan delay = TimeSpan.FromSeconds(retryDelay * multiplier * jitterMultiplier);
+                        try
+                        {
+                            await UniTask.Delay(
+                                delay,
+                                DelayType.Realtime,
+                                cancellationToken: requestToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            lastResult = HttpResult<T>.Failed(
+                                0,
+                                url,
+                                string.Empty,
+                                "请求已取消。",
+                                HttpErrorType.Canceled);
+                            Broadcast(method, lastResult);
+                            return lastResult;
+                        }
+                    }
                 }
             }
 
@@ -290,6 +347,18 @@ namespace GameFramework.Core
             }
 
             return HttpErrorType.Unknown;
+        }
+
+        private static bool ShouldRetry<T>(HttpResult<T> result)
+        {
+            if (result.ErrorType == HttpErrorType.Network || result.ErrorType == HttpErrorType.Timeout)
+            {
+                return true;
+            }
+
+            // 408、429 和 5xx 通常属于暂时性故障；其余 4xx 重试只会放大服务端压力。
+            return result.ErrorType == HttpErrorType.Server &&
+                   (result.StatusCode == 408 || result.StatusCode == 429 || result.StatusCode >= 500);
         }
 
         private void Broadcast<T>(string method, HttpResult<T> result)

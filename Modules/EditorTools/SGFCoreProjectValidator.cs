@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using GameFramework.Core;
 using UnityEditor;
 using UnityEditor.AddressableAssets;
 using UnityEditor.AddressableAssets.Settings;
@@ -14,7 +15,50 @@ namespace GameFramework.Editor
         {
             int missingCount = FindMissingScriptsAndReferences();
             int duplicateAddressCount = CheckAddressableAddresses();
-            Debug.Log($"[SGFCore Validation] 完成。Missing/Null 引用: {missingCount}, Addressables 重复地址: {duplicateAddressCount}");
+            int moduleDependencyCount = ValidateRuntimeModuleGraph();
+            Debug.Log(
+                $"[SGFCore Validation] 完成。Missing/Null 引用: {missingCount}, " +
+                $"Addressables 重复地址: {duplicateAddressCount}, 模块依赖错误: {moduleDependencyCount}");
+        }
+
+        [MenuItem("Tools/SGFCore/Validation/Validate Runtime Module Graph")]
+        public static int ValidateRuntimeModuleGraph()
+        {
+            if (!Application.isPlaying ||
+                !FrameworkEntry.TryGetInstance(out FrameworkEntry entry) ||
+                !entry.IsInitialized)
+            {
+                Debug.LogWarning("[SGFCore Validation] 模块依赖图需要在框架初始化完成后的 Play Mode 中检查。");
+                return 0;
+            }
+
+            IReadOnlyList<FrameworkModuleSnapshot> snapshots = entry.GetModuleGraphSnapshot();
+            var indices = new Dictionary<System.Type, int>(snapshots.Count);
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                indices[snapshots[i].ModuleType] = snapshots[i].InitializationIndex;
+            }
+
+            int issueCount = 0;
+            for (int i = 0; i < snapshots.Count; i++)
+            {
+                FrameworkModuleSnapshot snapshot = snapshots[i];
+                for (int j = 0; j < snapshot.Dependencies.Count; j++)
+                {
+                    System.Type dependency = snapshot.Dependencies[j];
+                    if (!indices.TryGetValue(dependency, out int dependencyIndex) ||
+                        dependencyIndex >= snapshot.InitializationIndex)
+                    {
+                        issueCount++;
+                        Debug.LogError(
+                            $"[SGFCore Validation] 模块顺序错误: {snapshot.ModuleType.Name} -> {dependency.Name}");
+                    }
+                }
+            }
+
+            Debug.Log(
+                $"[SGFCore Validation] 模块依赖图检查完成。模块数: {snapshots.Count}, 问题数: {issueCount}");
+            return issueCount;
         }
 
         [MenuItem("Tools/SGFCore/Validation/Find Missing Scripts And References")]

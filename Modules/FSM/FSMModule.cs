@@ -4,8 +4,6 @@ namespace GameFramework.Core
 {
     public class FsmModule : IFrameworkModule
     {
-        public int Priority => 70;
-
         // 存储所有活跃的状态机
         private readonly Dictionary<string, IFsmBase> _fsms = new Dictionary<string, IFsmBase>();
 

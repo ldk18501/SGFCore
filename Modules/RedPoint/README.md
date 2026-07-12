@@ -87,6 +87,16 @@ GameApp.RedPoint.SetCount("Main.Mail", unreadMailCount, this);
 GameApp.RedPoint.ClearCount("Main.Mail", this);
 ```
 
+批量刷新多个叶子节点时，用批次合并监听器与全局事件通知：
+
+```csharp
+using (GameApp.RedPoint.BeginBatch())
+{
+    GameApp.RedPoint.SetCount("Main.Mail", unreadMailCount, this);
+    GameApp.RedPoint.SetCount("Main.Task.Daily", dailyCount, this);
+}
+```
+
 如果不想业务耦合红点模块，优先使用 `RedPointConditionBadge` 或 `RedPointConditionProvider`。
 
 ## 监听变化

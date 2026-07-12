@@ -10,15 +10,16 @@ namespace GameFramework.Core
     /// </summary>
     public class ProcedureModule : IFrameworkModule
     {
-        public int Priority => 75;
-
         private readonly Dictionary<Type, ProcedureBase> _procedures = new Dictionary<Type, ProcedureBase>();
         private readonly Dictionary<string, object> _blackboard = new Dictionary<string, object>();
         private CancellationTokenSource _procedureCts;
+        private Type _pendingProcedureType;
+        private bool _transitionRunnerActive;
 
         public object Owner { get; private set; }
         public ProcedureBase CurrentProcedure { get; private set; }
         public bool IsRunning => CurrentProcedure != null;
+        public bool IsTransitioning { get; private set; }
 
         public void OnInit()
         {
@@ -27,7 +28,10 @@ namespace GameFramework.Core
 
         public void OnUpdate(float deltaTime, float unscaledDeltaTime)
         {
-            CurrentProcedure?.OnUpdate(deltaTime, unscaledDeltaTime);
+            if (!IsTransitioning)
+            {
+                CurrentProcedure?.OnUpdate(deltaTime, unscaledDeltaTime);
+            }
         }
 
         public void OnDestroy()
@@ -102,28 +106,23 @@ namespace GameFramework.Core
                 return;
             }
 
-            if (!_procedures.TryGetValue(procedureType, out ProcedureBase nextProcedure))
+            if (!_procedures.ContainsKey(procedureType))
             {
                 Log.Error($"[Procedure] 切换失败：未注册流程状态 {procedureType.Name}");
                 return;
             }
 
-            if (CurrentProcedure == nextProcedure)
+            if (CurrentProcedure != null && CurrentProcedure.GetType() == procedureType && _pendingProcedureType == null)
             {
                 return;
             }
 
-            ProcedureBase previousProcedure = CurrentProcedure;
-            previousProcedure?.OnLeave();
+            _pendingProcedureType = procedureType;
             CancelCurrentProcedureAsyncWork();
-            CurrentProcedure = nextProcedure;
-
-            GameApp.Event?.Broadcast(new ProcedureChangedEvent(
-                previousProcedure != null ? previousProcedure.GetType() : null,
-                CurrentProcedure.GetType()));
-
-            _procedureCts = new CancellationTokenSource();
-            RunProcedureEnterAsync(CurrentProcedure, _procedureCts.Token).Forget();
+            if (!_transitionRunnerActive)
+            {
+                RunTransitionQueueAsync().Forget();
+            }
         }
 
         public bool HasProcedure<TProcedure>() where TProcedure : ProcedureBase
@@ -146,9 +145,11 @@ namespace GameFramework.Core
             }
 
             ProcedureBase previousProcedure = CurrentProcedure;
+            _pendingProcedureType = null;
             previousProcedure.OnLeave();
             CancelCurrentProcedureAsyncWork();
             CurrentProcedure = null;
+            IsTransitioning = false;
 
             GameApp.Event?.Broadcast(new ProcedureStoppedEvent(previousProcedure.GetType()));
         }
@@ -178,6 +179,22 @@ namespace GameFramework.Core
             return !string.IsNullOrEmpty(key) && _blackboard.Remove(key);
         }
 
+        public void SetData<TData>(BlackboardKey<TData> key, TData value) => _blackboard[key.Name] = value;
+
+        public bool TryGetData<TData>(BlackboardKey<TData> key, out TData value)
+        {
+            if (_blackboard.TryGetValue(key.Name, out object rawValue) && rawValue is TData typedValue)
+            {
+                value = typedValue;
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
+
+        public bool RemoveData<TData>(BlackboardKey<TData> key) => _blackboard.Remove(key.Name);
+
         private void ClearProcedures()
         {
             foreach (var procedure in _procedures.Values)
@@ -201,18 +218,56 @@ namespace GameFramework.Core
             _procedureCts = null;
         }
 
-        private async UniTaskVoid RunProcedureEnterAsync(ProcedureBase procedure, CancellationToken cancellationToken)
+        private async UniTaskVoid RunTransitionQueueAsync()
         {
+            _transitionRunnerActive = true;
             try
             {
-                await procedure.OnEnterAsync(cancellationToken);
+                while (_pendingProcedureType != null)
+                {
+                    Type nextType = _pendingProcedureType;
+                    _pendingProcedureType = null;
+                    ProcedureBase nextProcedure = _procedures[nextType];
+                    if (CurrentProcedure == nextProcedure)
+                    {
+                        continue;
+                    }
+
+                    IsTransitioning = true;
+                    ProcedureBase previousProcedure = CurrentProcedure;
+                    previousProcedure?.OnLeave();
+                    CurrentProcedure = nextProcedure;
+
+                    GameApp.Event?.Broadcast(new ProcedureChangedEvent(
+                        previousProcedure != null ? previousProcedure.GetType() : null,
+                        CurrentProcedure.GetType()));
+
+                    _procedureCts = new CancellationTokenSource();
+                    try
+                    {
+                        await CurrentProcedure.OnEnterAsync(_procedureCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error($"[Procedure] 流程进入异常: {nextProcedure.GetType().Name}, {e}");
+                    }
+                    finally
+                    {
+                        CancelCurrentProcedureAsyncWork();
+                    }
+                }
             }
-            catch (OperationCanceledException)
+            finally
             {
-            }
-            catch (Exception e)
-            {
-                Log.Error($"[Procedure] 流程进入异常: {procedure.GetType().Name}, {e}");
+                IsTransitioning = false;
+                _transitionRunnerActive = false;
+                if (_pendingProcedureType != null)
+                {
+                    RunTransitionQueueAsync().Forget();
+                }
             }
         }
     }

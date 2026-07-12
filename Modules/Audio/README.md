@@ -60,6 +60,15 @@ GameApp.Audio.PauseAll();
 GameApp.Audio.ResumeAll();
 ```
 
+音量和静音默认写入 `PlayerPrefs`，可将 `PersistVolumeSettings` 设为 `false` 关闭。使用 AudioMixer 时可绑定分组：
+
+```csharp
+GameApp.Audio.SetMixerGroup(AudioGroup.BGM, bgmMixerGroup);
+GameApp.Audio.SetMixerGroup(AudioGroup.SFX, sfxMixerGroup);
+```
+
+`MaxConcurrentSfx` 默认 32。达到上限后会按 `priority` 淘汰较低优先级的非循环音效；循环音效不会被自动抢占。
+
 默认分组：
 
 ```text

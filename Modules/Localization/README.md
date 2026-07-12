@@ -1,6 +1,6 @@
 # Localization 模块使用说明
 
-Localization 模块负责加载语言表、切换语言，并通知 UI 上的本地化组件自动刷新。模块默认由 `FrameworkEntry.InitFrameworkModules()` 注册，业务层通过 `GameApp.Loc` 访问。
+Localization 模块负责加载语言表、切换语言，并通知 UI 上的本地化组件自动刷新。模块由 `FrameworkEntry.InitFrameworkModulesAsync()` 注册，业务层通过 `GameApp.Loc` 访问。
 
 语言表 bytes 的实际加载由 `ConfigModule` 完成，Localization 只负责根据当前语言选择地址，并维护文本查询缓存。
 
@@ -20,7 +20,7 @@ LanguageTableConf_ZH
 GameApp.Loc.SetLanguageTablePrefix("MyLanguageTable");
 ```
 
-如果项目习惯使用 `CN`、`GE` 这类后缀，可以直接使用枚举里的 `CN/GE`，或者手动映射：
+如果项目习惯使用 `CN`、`GE` 这类后缀，可以直接使用枚举里的 `CN/GE`，或者手动映射。映射会同时作用于语言表和 `LocalizedImage`：
 
 ```csharp
 GameApp.Loc.SetLanguageSuffix(SystemLanguageType.ZH, "CN");
@@ -42,6 +42,8 @@ bool ok = await GameApp.Loc.TryChangeLanguageAsync(SystemLanguageType.EN);
 ```
 
 目标语言表缺失时，模块会自动回退到 `Default` 表，并在 `LanguageChangedEvent.IsFallback` 中标记。
+
+并发切换语言时，新请求会取消旧请求；加载失败不会清空当前已生效语言。成功语言会写入偏好，下次启动优先恢复；首次启动会根据系统语言选择。
 
 ## 获取文本
 
@@ -85,7 +87,10 @@ public struct LanguageChangedEvent
     public SystemLanguageType RequestedLanguage;
     public SystemLanguageType NewLanguage;
     public bool IsFallback;
+    public string CultureName;
 }
 ```
+
+`Format` 使用当前语言对应的 `CultureInfo`，也可通过模块接口覆盖语言到 culture 的映射。
 
 一般 UI 不需要手写监听，直接挂本地化组件即可。只有玩法或系统逻辑需要感知语言变化时，再监听这个事件。

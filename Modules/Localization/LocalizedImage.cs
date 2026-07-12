@@ -65,7 +65,7 @@ namespace GameFramework.Core.UI
             }
 
             int version = ++_refreshVersion;
-            string languageSuffix = GetLanguageSuffix(localization.CurrentLanguage);
+            string languageSuffix = localization.GetLanguageSuffix(localization.CurrentLanguage);
             Sprite sprite = await LoadSpriteWithFallback(resource, languageSuffix);
 
             if (version != _refreshVersion || !isActiveAndEnabled)
@@ -160,9 +160,5 @@ namespace GameFramework.Core.UI
             }
         }
 
-        private static string GetLanguageSuffix(SystemLanguageType language)
-        {
-            return language == SystemLanguageType.Default ? "Default" : language.ToString();
-        }
     }
 }

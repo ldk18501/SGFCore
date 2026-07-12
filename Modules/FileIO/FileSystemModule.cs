@@ -7,8 +7,6 @@ namespace GameFramework.Core
     /// </summary>
     public class FileSystemModule : IFrameworkModule
     {
-        public int Priority => 5; // 优先级应该比日志稍微低一点，但比其他业务模块高
-
         private IFileSystemStrategy _strategy;
 
         public void OnInit()
@@ -21,6 +19,12 @@ namespace GameFramework.Core
 #else
             _strategy = new StandardFileSystemStrategy();
 #endif
+            if (_strategy == null)
+            {
+                throw new System.InvalidOperationException(
+                    "当前平台尚未配置 IFileSystemStrategy，请先接入对应小游戏文件系统实现。");
+            }
+
             Log.Module("FileSystem", $"文件系统模块初始化完成，当前策略: {_strategy.GetType().Name}");
         }
 
@@ -43,16 +47,30 @@ namespace GameFramework.Core
 #endif
         }
 
-        public bool Exists(string relativeOrAbsolutePath) => _strategy.Exists(relativeOrAbsolutePath);
+        public bool Exists(string relativeOrAbsolutePath) => _strategy.Exists(ResolvePath(relativeOrAbsolutePath));
         
-        public string ReadText(string filePath) => _strategy.ReadText(filePath);
+        public string ReadText(string filePath) => _strategy.ReadText(ResolvePath(filePath));
         
-        public void WriteText(string filePath, string content) => _strategy.WriteText(filePath, content);
-        
-        public byte[] ReadBytes(string filePath) => _strategy.ReadBytes(filePath);
-        
-        public void WriteBytes(string filePath, byte[] bytes) => _strategy.WriteBytes(filePath, bytes);
+        public void WriteText(string filePath, string content) => _strategy.WriteText(ResolvePath(filePath), content);
 
-        public void DeleteFile(string filePath) => _strategy.DeleteFile(filePath);
+        public void WriteTextAtomic(string filePath, string content) =>
+            _strategy.WriteTextAtomic(ResolvePath(filePath), content);
+        
+        public byte[] ReadBytes(string filePath) => _strategy.ReadBytes(ResolvePath(filePath));
+        
+        public void WriteBytes(string filePath, byte[] bytes) => _strategy.WriteBytes(ResolvePath(filePath), bytes);
+
+        public void DeleteFile(string filePath) => _strategy.DeleteFile(ResolvePath(filePath));
+
+        private string ResolvePath(string relativeOrAbsolutePath)
+        {
+            if (string.IsNullOrWhiteSpace(relativeOrAbsolutePath) ||
+                System.IO.Path.IsPathRooted(relativeOrAbsolutePath))
+            {
+                return relativeOrAbsolutePath;
+            }
+
+            return System.IO.Path.Combine(GetPersistentDataPath(), relativeOrAbsolutePath);
+        }
     }
 }

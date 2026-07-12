@@ -36,7 +36,6 @@ namespace GameFramework.Core
         private bool _isStarted;
         private bool _isEvaluating;
 
-        public int Priority => 51;
         public bool IsStarted => _isStarted;
         public bool IsRunning => _current != null;
         public GuideDefinition CurrentDefinition => _current?.Definition;
@@ -1069,7 +1068,6 @@ namespace GameFramework.Core
 
             _saveData.SetCompleted(_completedStepIds);
             _saveData.SetSkipped(_skippedStepIds);
-            _saveData.ClearDirty();
 
             if (_saveModule != null)
             {

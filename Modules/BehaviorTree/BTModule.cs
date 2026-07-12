@@ -8,8 +8,6 @@ namespace GameFramework.Core
 {
     public class BTModule : IFrameworkModule
     {
-        public int Priority => 80;
-
         private readonly List<BehaviorTree> _activeTrees = new List<BehaviorTree>();
         
         // 记录每个行为树组件对应加载了哪个外部资源文件
@@ -44,6 +42,12 @@ namespace GameFramework.Core
                 return null;
             }
 
+            if (owner == null)
+            {
+                GameApp.Res.ReleaseAsset(externalTree);
+                return null;
+            }
+
             var tree = owner.AddComponent<BehaviorTree>();
             tree.StartWhenEnabled = false; 
             tree.ExternalBehavior = externalTree;
@@ -61,9 +65,14 @@ namespace GameFramework.Core
 
         public void DetachTree(BehaviorTree tree)
         {
-            if (tree == null) return;
-            
-            tree.DisableBehavior();
+            if (object.ReferenceEquals(tree, null)) return;
+
+            bool treeIsAlive = tree != null;
+            if (treeIsAlive)
+            {
+                tree.DisableBehavior();
+            }
+
             _activeTrees.Remove(tree);
 
             // 利用追踪器获取真正的资源引用并释放
@@ -71,10 +80,13 @@ namespace GameFramework.Core
             {
                 GameApp.Res.ReleaseAsset(externalTree);
                 _treeAssetMap.Remove(tree);
-                Log.Info($"[AI] 已释放行为树资源引用，当前对象: {tree.gameObject.name}");
+                Log.Info($"[AI] 已释放行为树资源引用: {externalTree.name}");
             }
-            
-            UnityEngine.Object.Destroy(tree);
+
+            if (treeIsAlive)
+            {
+                UnityEngine.Object.Destroy(tree);
+            }
         }
 
         public void PauseAllAI()

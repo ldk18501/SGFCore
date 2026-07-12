@@ -4,7 +4,7 @@ FileIO 模块封装文件读写能力，默认策略是 `StandardFileSystemStrat
 
 ## 初始化
 
-`FileSystemModule` 由 `FrameworkEntry` 注册，优先级为 `5`，早于存档和加密模块。
+`FileSystemModule` 由 `FrameworkEntry` 注册；`SaveModule` 显式依赖它，因此拓扑排序会确保文件系统先完成初始化。
 
 ## 常用 API
 

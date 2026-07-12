@@ -16,5 +16,6 @@ namespace GameFramework.Core.UI
         // --- 新增配置项 ---
         public bool IsSingleton; // 是否全局唯一（比如主界面、设置面板）
         public bool IsCached; // 是否开启隐藏缓存（关闭时不销毁，极速秒开）
+        public int MaxCachedInstances; // 非单例界面必须有明确缓存上限
     }
 }

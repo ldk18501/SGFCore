@@ -56,6 +56,8 @@ ChangeProcedure<ProcedureMainMenu>();
 GameApp.Procedure.ChangeProcedure<ProcedureMainMenu>();
 ```
 
+切换请求由模块串行处理。新的切换会取消上一流程尚未完成的 `OnEnterAsync`，并在退出/进入过渡完成前暂停该流程的 `OnUpdate`。异步流程必须观察传入的 `CancellationToken`。
+
 ## 黑板数据
 
 流程之间需要共享少量启动期数据时，可以使用模块黑板：
@@ -63,6 +65,16 @@ GameApp.Procedure.ChangeProcedure<ProcedureMainMenu>();
 ```csharp
 SetData("CurrentSave", saveData);
 SimulationSaveData save = GetData<SimulationSaveData>("CurrentSave");
+```
+
+正式业务推荐声明强类型 Key：
+
+```csharp
+private static readonly BlackboardKey<SimulationSaveData> CurrentSaveKey =
+    new BlackboardKey<SimulationSaveData>("CurrentSave");
+
+SetData(CurrentSaveKey, saveData);
+if (TryGetData(CurrentSaveKey, out SimulationSaveData save)) { }
 ```
 
 黑板适合存流程临时数据，不建议放大量长期业务状态。长期数据应放到专门的数据模块或存档模块。

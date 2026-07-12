@@ -29,6 +29,45 @@ namespace GameFramework.Core
             File.WriteAllText(filePath, content);
         }
 
+        public void WriteTextAtomic(string filePath, string content)
+        {
+            string dir = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string temporaryPath = filePath + ".tmp";
+            File.WriteAllText(temporaryPath, content);
+
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        File.Replace(temporaryPath, filePath, null);
+                    }
+                    catch (System.PlatformNotSupportedException)
+                    {
+                        File.Delete(filePath);
+                        File.Move(temporaryPath, filePath);
+                    }
+                }
+                else
+                {
+                    File.Move(temporaryPath, filePath);
+                }
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                {
+                    File.Delete(temporaryPath);
+                }
+            }
+        }
+
         public byte[] ReadBytes(string filePath)
         {
             if (!Exists(filePath)) return null;

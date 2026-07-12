@@ -4,7 +4,9 @@ Debugger 模块负责统一日志输出。实际业务通常直接使用静态 `
 
 ## 初始化
 
-`LogModule` 由 `FrameworkEntry` 最先注册，优先级为 `0`，保证后续模块初始化时可以正常输出日志。
+`LogModule` 在 `FrameworkEntry` 的模块依赖图中作为基础节点注册。依赖它的模块会在它完成初始化后启动，不再依赖魔法优先级数字。
+
+文件日志使用 `Application.logMessageReceivedThreaded` 入队，主线程分批写入；默认单文件 8 MB、保留 10 个文件。可通过 `MaxLinesPerFrame`、`FlushIntervalSeconds`、`MaxFileBytes` 和 `RetainedFileCount` 调整策略。
 
 ## 常用 API
 

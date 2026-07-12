@@ -55,6 +55,16 @@ fsm.SetData("LevelId", 3);
 int levelId = fsm.GetData<int>("LevelId");
 ```
 
+跨状态共享的正式字段推荐用强类型 Key：
+
+```csharp
+static readonly BlackboardKey<int> LevelIdKey = new BlackboardKey<int>("LevelId");
+fsm.SetData(LevelIdKey, 3);
+fsm.TryGetData(LevelIdKey, out int levelId);
+```
+
+状态切换已做可重入保护：在 `OnEnter`/`OnLeave` 中再次请求切换时会进入串行队列，并对循环跳转设置保护上限。
+
 ## 销毁
 
 ```csharp

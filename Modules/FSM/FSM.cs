@@ -14,6 +14,8 @@ namespace GameFramework.Core
 
         private readonly Dictionary<Type, FsmState<T>> _states = new Dictionary<Type, FsmState<T>>();
         private readonly Dictionary<string, object> _blackboard = new Dictionary<string, object>();
+        private bool _isChangingState;
+        private Type _pendingStateType;
 
         // 初始化状态机
         public Fsm(string name, T owner, params FsmState<T>[] states)
@@ -41,19 +43,53 @@ namespace GameFramework.Core
 
         public void ChangeState<TState>() where TState : FsmState<T>
         {
-            Type targetType = typeof(TState);
-            if (!_states.TryGetValue(targetType, out var targetState))
+            RequestStateChange(typeof(TState));
+        }
+
+        private void RequestStateChange(Type targetType)
+        {
+            if (!_states.ContainsKey(targetType))
             {
                 Log.Error($"[FSM] 状态切换失败：未在状态机中找到状态 {targetType.Name}");
                 return;
             }
 
-            // 退出当前状态
-            CurrentState?.OnLeave();
-            
-            // 切换并进入新状态
-            CurrentState = targetState;
-            CurrentState.OnEnter();
+            _pendingStateType = targetType;
+            if (_isChangingState)
+            {
+                return;
+            }
+
+            _isChangingState = true;
+            try
+            {
+                int transitionCount = 0;
+                while (_pendingStateType != null)
+                {
+                    if (++transitionCount > _states.Count + 1)
+                    {
+                        Log.Error($"[FSM] 状态机 {Name} 在一次切换中产生了过多连续跳转，已中止以避免死循环。");
+                        _pendingStateType = null;
+                        break;
+                    }
+
+                    Type nextType = _pendingStateType;
+                    _pendingStateType = null;
+                    FsmState<T> targetState = _states[nextType];
+                    if (CurrentState == targetState)
+                    {
+                        continue;
+                    }
+
+                    CurrentState?.OnLeave();
+                    CurrentState = targetState;
+                    CurrentState.OnEnter();
+                }
+            }
+            finally
+            {
+                _isChangingState = false;
+            }
         }
 
         public void Update(float deltaTime, float unscaledDeltaTime)
@@ -82,5 +118,21 @@ namespace GameFramework.Core
             if (_blackboard.TryGetValue(key, out var val) && val is TData data) return data;
             return default;
         }
+
+        public void SetData<TData>(BlackboardKey<TData> key, TData value) => _blackboard[key.Name] = value;
+
+        public bool TryGetData<TData>(BlackboardKey<TData> key, out TData value)
+        {
+            if (_blackboard.TryGetValue(key.Name, out object rawValue) && rawValue is TData typedValue)
+            {
+                value = typedValue;
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
+
+        public bool RemoveData<TData>(BlackboardKey<TData> key) => _blackboard.Remove(key.Name);
     }
 }

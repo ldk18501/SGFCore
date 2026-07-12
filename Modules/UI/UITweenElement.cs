@@ -66,11 +66,14 @@ namespace GameFramework.Core.UI
     /// <summary>
     /// UI 动效表现组件 (支持挂载到任意 UI 节点)
     /// </summary>
+    [RequireComponent(typeof(RectTransform))]
     public class UITweenElement : MonoBehaviour
     {
-        [Header("入场动画 (PlayIn)")] public UITweenStateConfig InConfig;
+        [SerializeField] private UITweenProfile _profile;
 
-        [Header("退场动画 (PlayOut)")] public UITweenStateConfig OutConfig;
+        [Header("入场动画 (PlayIn)")] public UITweenStateConfig InConfig = new UITweenStateConfig();
+
+        [Header("退场动画 (PlayOut)")] public UITweenStateConfig OutConfig = new UITweenStateConfig();
 
         private RectTransform _rect;
         private CanvasGroup _canvasGroup;
@@ -80,16 +83,27 @@ namespace GameFramework.Core.UI
         private Vector2 _originalPos;
         private Vector3 _originalScale;
         private float _originalAlpha;
+        private bool _baselineCaptured;
 
         private void Awake()
         {
             _rect = GetComponent<RectTransform>();
             _canvasGroup = GetComponent<CanvasGroup>();
 
-            // 缓存原本的排版数据
+        }
+
+        public void CaptureBaseline(bool force = false)
+        {
+            if (_baselineCaptured && !force)
+            {
+                return;
+            }
+
+            Canvas.ForceUpdateCanvases();
             _originalPos = _rect.anchoredPosition;
             _originalScale = _rect.localScale;
             _originalAlpha = _canvasGroup != null ? _canvasGroup.alpha : 1f;
+            _baselineCaptured = true;
         }
 
         // ==========================================
@@ -130,45 +144,47 @@ namespace GameFramework.Core.UI
         /// </summary>
         public Sequence PlayIn()
         {
+            CaptureBaseline();
             StopAllTweens();
             Sequence seq = Sequence.Create();
+            UITweenStateConfig config = _profile != null ? _profile.In : InConfig;
 
-            if (InConfig.Position.Enable)
+            if (config.Position.Enable)
             {
-                Vector2 dynamicOffset = CalculateOffset(InConfig.Position);
+                Vector2 dynamicOffset = CalculateOffset(config.Position);
                 _rect.anchoredPosition = _originalPos + dynamicOffset;
 
                 // 【修正】：使用 PrimeTween 标准的 startDelay 命名参数
                 seq.Group(Tween.UIAnchoredPosition(
                     _rect,
                     _originalPos,
-                    duration: InConfig.Position.Duration,
-                    ease: InConfig.Position.EaseType,
-                    startDelay: InConfig.Position.Delay));
+                    duration: Mathf.Max(0f, config.Position.Duration),
+                    ease: config.Position.EaseType,
+                    startDelay: Mathf.Max(0f, config.Position.Delay)));
             }
 
-            if (InConfig.Scale.Enable)
+            if (config.Scale.Enable)
             {
-                _rect.localScale = InConfig.Scale.ScaleValue;
+                _rect.localScale = config.Scale.ScaleValue;
 
                 seq.Group(Tween.Scale(
                     _rect,
                     _originalScale,
-                    duration: InConfig.Scale.Duration,
-                    ease: InConfig.Scale.EaseType,
-                    startDelay: InConfig.Scale.Delay));
+                    duration: Mathf.Max(0f, config.Scale.Duration),
+                    ease: config.Scale.EaseType,
+                    startDelay: Mathf.Max(0f, config.Scale.Delay)));
             }
 
-            if (InConfig.Alpha.Enable && _canvasGroup != null)
+            if (config.Alpha.Enable && _canvasGroup != null)
             {
-                _canvasGroup.alpha = InConfig.Alpha.AlphaValue;
+                _canvasGroup.alpha = config.Alpha.AlphaValue;
 
                 seq.Group(Tween.Alpha(
                     _canvasGroup,
                     _originalAlpha,
-                    duration: InConfig.Alpha.Duration,
-                    ease: InConfig.Alpha.EaseType,
-                    startDelay: InConfig.Alpha.Delay));
+                    duration: Mathf.Max(0f, config.Alpha.Duration),
+                    ease: config.Alpha.EaseType,
+                    startDelay: Mathf.Max(0f, config.Alpha.Delay)));
             }
 
             return seq;
@@ -179,45 +195,47 @@ namespace GameFramework.Core.UI
         /// </summary>
         public Sequence PlayOut()
         {
+            CaptureBaseline();
             StopAllTweens();
             Sequence seq = Sequence.Create();
+            UITweenStateConfig config = _profile != null ? _profile.Out : OutConfig;
 
-            if (OutConfig.Position.Enable)
+            if (config.Position.Enable)
             {
-                Vector2 dynamicOffset = CalculateOffset(OutConfig.Position);
+                Vector2 dynamicOffset = CalculateOffset(config.Position);
                 _rect.anchoredPosition = _originalPos;
 
                 // 【修正】：使用 PrimeTween 标准的 startDelay 命名参数
                 seq.Group(Tween.UIAnchoredPosition(
                     _rect,
                     _originalPos + dynamicOffset,
-                    duration: OutConfig.Position.Duration,
-                    ease: OutConfig.Position.EaseType,
-                    startDelay: OutConfig.Position.Delay));
+                    duration: Mathf.Max(0f, config.Position.Duration),
+                    ease: config.Position.EaseType,
+                    startDelay: Mathf.Max(0f, config.Position.Delay)));
             }
 
-            if (OutConfig.Scale.Enable)
+            if (config.Scale.Enable)
             {
                 _rect.localScale = _originalScale;
 
                 seq.Group(Tween.Scale(
                     _rect,
-                    OutConfig.Scale.ScaleValue,
-                    duration: OutConfig.Scale.Duration,
-                    ease: OutConfig.Scale.EaseType,
-                    startDelay: OutConfig.Scale.Delay));
+                    config.Scale.ScaleValue,
+                    duration: Mathf.Max(0f, config.Scale.Duration),
+                    ease: config.Scale.EaseType,
+                    startDelay: Mathf.Max(0f, config.Scale.Delay)));
             }
 
-            if (OutConfig.Alpha.Enable && _canvasGroup != null)
+            if (config.Alpha.Enable && _canvasGroup != null)
             {
                 _canvasGroup.alpha = _originalAlpha;
 
                 seq.Group(Tween.Alpha(
                     _canvasGroup,
-                    OutConfig.Alpha.AlphaValue,
-                    duration: OutConfig.Alpha.Duration,
-                    ease: OutConfig.Alpha.EaseType,
-                    startDelay: OutConfig.Alpha.Delay));
+                    config.Alpha.AlphaValue,
+                    duration: Mathf.Max(0f, config.Alpha.Duration),
+                    ease: config.Alpha.EaseType,
+                    startDelay: Mathf.Max(0f, config.Alpha.Delay)));
             }
 
             return seq;
@@ -227,6 +245,11 @@ namespace GameFramework.Core.UI
         {
             Tween.StopAll(_rect);
             if (_canvasGroup != null) Tween.StopAll(_canvasGroup);
+        }
+
+        private void OnDisable()
+        {
+            StopAllTweens();
         }
     }
 }

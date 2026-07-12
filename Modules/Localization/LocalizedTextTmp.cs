@@ -9,6 +9,7 @@ namespace GameFramework.Core.UI
     {
         [FormerlySerializedAs("KeyId")]
         [SerializeField] private int _keyId;
+        [SerializeField] private string _key;
 
         private TMP_Text _textComponent;
         private bool _subscribed;
@@ -17,6 +18,12 @@ namespace GameFramework.Core.UI
         {
             get => _keyId;
             set => SetKeyId(value);
+        }
+
+        public string Key
+        {
+            get => _key;
+            set => SetKey(value);
         }
 
         private void Awake()
@@ -38,18 +45,32 @@ namespace GameFramework.Core.UI
         public void SetKeyId(int newKeyId)
         {
             _keyId = newKeyId;
+            _key = string.Empty;
+            RefreshText();
+        }
+
+        public void SetKey(string newKey)
+        {
+            _key = newKey ?? string.Empty;
             RefreshText();
         }
 
         public void RefreshText()
         {
             LocalizationModule localization = GameApp.Loc;
-            if (_textComponent == null || _keyId <= 0 || localization == null)
+            if (_textComponent == null || localization == null)
             {
                 return;
             }
 
-            _textComponent.text = localization.GetString(_keyId);
+            if (!string.IsNullOrWhiteSpace(_key))
+            {
+                _textComponent.text = localization.GetString(_key);
+            }
+            else if (_keyId > 0)
+            {
+                _textComponent.text = localization.GetString(_keyId);
+            }
         }
 
         private void Subscribe()

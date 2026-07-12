@@ -22,5 +22,8 @@ namespace GameFramework.Core
         // 黑板功能：在状态机内部共享数据
         void SetData(string key, object value);
         TData GetData<TData>(string key);
+        bool TryGetData<TData>(BlackboardKey<TData> key, out TData value);
+        void SetData<TData>(BlackboardKey<TData> key, TData value);
+        bool RemoveData<TData>(BlackboardKey<TData> key);
     }
 }

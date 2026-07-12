@@ -34,7 +34,7 @@ namespace GameFramework.Core.Demo
             await GameApp.Config.TryLoadConfigsBatchAsync(configsToLoad, cancellationToken);
 
             // 3. 读取玩家本地存档
-            var save = GameApp.Save.LoadData<SimulationSaveData>("MainSave");
+            var save = GameApp.Save.LoadData<SimulationSaveData>("MainSave", useEncryption: false);
             // 把它存到 Procedure 黑板里，或者丢给全局的 DataManager
             SetData("CurrentSave", save);
 

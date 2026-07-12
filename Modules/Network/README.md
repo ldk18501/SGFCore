@@ -46,7 +46,9 @@ HttpRequestOptions options = new HttpRequestOptions
 {
     Timeout = 5,
     RetryCount = 2,
-    RetryDelay = 0.3f
+    RetryDelay = 0.3f,
+    UseExponentialBackoff = true,
+    RetryJitter = 0.2f
 };
 options.Headers["X-Request-Id"] = requestId;
 
@@ -77,4 +79,6 @@ HttpRequestCompletedEvent
 ## 注意事项
 
 - 当前使用 `JsonUtility`，不适合复杂 JSON、字典或顶层数组。
+- GET 默认只重试网络错误、超时、408、429 和 5xx；普通 4xx 与反序列化失败不会重试。
+- POST 默认不重试，只有明确设置 `RetryNonIdempotent = true` 才会重试，避免重复提交。
 - 如果后端返回统一 `code/message/data`，建议在业务层定义对应响应结构，不要让 HttpModule 绑定具体协议。

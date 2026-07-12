@@ -36,6 +36,8 @@ namespace GameFramework.Core.UI
         public bool IsDestroyed { get; private set; }
 
         private Canvas _canvas;
+        private GraphicRaycaster _graphicRaycaster;
+        private CanvasGroup _canvasGroup;
 
         // --- 生命周期追踪器 ---
         // 记录在这个 UI 上注册的所有事件
@@ -44,6 +46,7 @@ namespace GameFramework.Core.UI
         // 记录在这个 UI 上动态加载的资源和预制体实例
         private readonly List<object> _scopedAssets = new List<object>();
         private readonly List<GameObject> _scopedInstances = new List<GameObject>();
+        private CancellationTokenSource _destroyCts;
 
         protected virtual void Awake()
         {
@@ -59,14 +62,37 @@ namespace GameFramework.Core.UI
             IsCached = isCached;
             IsClosing = false;
             IsDestroyed = false;
+            _destroyCts?.Dispose();
+            _destroyCts = new CancellationTokenSource();
 
             _canvas = GetComponent<Canvas>();
+            _graphicRaycaster = GetComponent<GraphicRaycaster>();
+            _canvasGroup = GetComponent<CanvasGroup>();
             _canvas.overrideSorting = true;
+            Canvas.ForceUpdateCanvases();
+            for (int i = 0; i < _tweenElements.Length; i++)
+            {
+                _tweenElements[i].CaptureBaseline();
+            }
         }
 
         internal void SetSortingOrder(int order)
         {
             if (_canvas != null) _canvas.sortingOrder = order;
+        }
+
+        internal void SetInteractionEnabled(bool enabled)
+        {
+            if (_graphicRaycaster != null)
+            {
+                _graphicRaycaster.enabled = enabled;
+            }
+
+            if (_canvasGroup != null)
+            {
+                _canvasGroup.interactable = enabled;
+                _canvasGroup.blocksRaycasts = enabled;
+            }
         }
 
         // ==========================================
@@ -111,7 +137,7 @@ namespace GameFramework.Core.UI
         /// </summary>
         protected async UniTask<T> LoadAssetAsync<T>(string address) where T : UnityEngine.Object
         {
-            T asset = await GameApp.Res.LoadAssetAsync<T>(address);
+            T asset = await GameApp.Res.LoadAssetAsync<T>(address, GetDestroyToken());
             if (asset != null)
             {
                 _scopedAssets.Add(asset);
@@ -125,7 +151,7 @@ namespace GameFramework.Core.UI
         /// </summary>
         protected async UniTask<GameObject> InstantiateAsync(string address, Transform parent)
         {
-            GameObject go = await GameApp.Res.InstantiateAsync(address, parent);
+            GameObject go = await GameApp.Res.InstantiateAsync(address, parent, GetDestroyToken());
             if (go != null)
             {
                 _scopedInstances.Add(go);
@@ -166,8 +192,14 @@ namespace GameFramework.Core.UI
         internal void InternalClose()
         {
             IsClosing = true;
-            OnClose();
-            UnsubscribeAllEvents(); // 隐藏时立刻断开事件，防止后台耗性能
+            try
+            {
+                OnClose();
+            }
+            finally
+            {
+                UnsubscribeAllEvents(); // 隐藏时立刻断开事件，防止后台耗性能
+            }
         }
 
         internal void InternalDestroy()
@@ -178,8 +210,23 @@ namespace GameFramework.Core.UI
             }
 
             IsDestroyed = true;
-            OnDestroyUI();
-            UnloadAllResources(); // 彻底销毁时才释放图片和特效
+            _destroyCts?.Cancel();
+            try
+            {
+                OnDestroyUI();
+            }
+            finally
+            {
+                UnsubscribeAllEvents();
+                UnloadAllResources(); // 彻底销毁时才释放图片和特效
+                _destroyCts?.Dispose();
+                _destroyCts = null;
+            }
+        }
+
+        private CancellationToken GetDestroyToken()
+        {
+            return _destroyCts != null ? _destroyCts.Token : new CancellationToken(true);
         }
 
 

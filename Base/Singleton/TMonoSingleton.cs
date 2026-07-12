@@ -11,6 +11,14 @@ namespace GameFramework.Core
         private static readonly object _lock = new object();
         private static bool _applicationIsQuitting = false;
 
+        public static bool HasInstance => _instance != null;
+
+        public static bool TryGetInstance(out T instance)
+        {
+            instance = _instance;
+            return instance != null;
+        }
+
         public static T Instance
         {
             get

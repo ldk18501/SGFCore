@@ -5,14 +5,21 @@ SGFCore 是一个面向 Unity 休闲游戏和中小型项目的轻量游戏框�
 ## 快速接入
 
 1. 在启动场景放置或自动创建 `FrameworkEntry`。
-2. 调用 `FrameworkEntry.Instance.InitFrameworkModules()` 注册基础模块。
-3. 启动流程中优先等待资源模块初始化：
+2. 等待框架完成显式依赖排序和所有同步/异步模块初始化：
 
 ```csharp
-await GameApp.Res.EnsureInitializedAsync();
+bool ready = await FrameworkEntry.Instance.InitFrameworkModulesAsync(
+    frameworkConfig,
+    cancellationToken);
+if (!ready)
+{
+    return;
+}
 ```
 
-4. 业务层通过 `GameApp` 使用模块，尽量避免直接保存模块内部对象引用。
+3. 业务层通过 `GameApp` 使用模块，尽量避免直接保存模块内部对象引用。
+
+框架不再使用数字 `Priority` 推断顺序。内建模块在 `FrameworkEntry` 的 composition root 中声明直接依赖，经稳定拓扑排序后初始化，并按相反顺序关闭。自定义模块也应在初始化开始前通过 `RegisterModule(module, dependencyTypes...)` 完成组装。
 
 ## 模块目录
 
@@ -43,7 +50,7 @@ await GameApp.Res.EnsureInitializedAsync();
 
 ## 推荐约定
 
-- 初始化顺序交给 `FrameworkEntry` 管理，不依赖 Unity 脚本执行顺序。
+- 初始化顺序交给 `FrameworkEntry` 的显式依赖图管理，不依赖 Unity 脚本执行顺序或魔法优先级数字。
 - 资源通过 `GameApp.Res` 加载后，使用对应的 `ReleaseAsset` 或 `ReleaseInstance` 释放。
 - UI 内部事件订阅优先使用 `UIFormBase.Subscribe<T>()`，关闭界面时会自动解除。
 - 业务状态变化优先广播事件，显示层或条件层监听事件后刷新，减少模块与业务互相调用。

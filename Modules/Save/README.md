@@ -2,6 +2,8 @@
 
 Save 模块负责本地存档读写，默认保存到 `persistentDataPath/Saves/{Slot}`，支持加密、版本号、数据迁移、多存档槽、模块化存档和脏标记自动存档。
 
+为兼容既有项目，存档接口默认使用加密。使用默认参数前必须通过 `FrameworkConfig` 配置有效密钥；不需要加密时应显式传入 `useEncryption: false`。加密读档缺少密钥时，框架会明确失败，但不会把原存档误判为损坏文件或覆盖原文件。
+
 ## 定义存档
 
 ```csharp
@@ -79,7 +81,11 @@ GameApp.Save.RegisterMigration(new PlayerSaveMigration());
 ```csharp
 data.IsAutoSaveEnabled = true;
 data.AutoSaveInterval = 30f;
+GameApp.Save.TrackAutoSave("Player", data, () =>
+    GameApp.Save.SaveData("Player", data, useEncryption: false));
 ```
+
+也可以在存档类型构造阶段设置自动存档参数，让 `LoadData` 在完成读取后自动注册。写盘成功后模块会清除 dirty；写盘失败时 dirty 会保留，等待下次重试。
 
 事件：
 

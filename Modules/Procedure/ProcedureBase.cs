@@ -59,6 +59,16 @@ namespace GameFramework.Core
             return Module.GetData<TData>(key);
         }
 
+        protected void SetData<TData>(BlackboardKey<TData> key, TData value)
+        {
+            Module.SetData(key, value);
+        }
+
+        protected bool TryGetData<TData>(BlackboardKey<TData> key, out TData value)
+        {
+            return Module.TryGetData(key, out value);
+        }
+
         protected TOwner GetOwner<TOwner>() where TOwner : class
         {
             return Owner as TOwner;

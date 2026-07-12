@@ -13,10 +13,8 @@ namespace GameFramework.Core
     /// 全局资源管理模块 (基于 Addressables)
     /// 统一负责 Addressables 初始化、加载句柄追踪、实例释放和泄漏审计。
     /// </summary>
-    public class ResourceModule : IFrameworkModule
+    public class ResourceModule : IAsyncFrameworkModule
     {
-        public int Priority => 40; // 优先级排在文件系统和日志之后
-
         private readonly Dictionary<UnityEngine.Object, Stack<AssetHandleRecord>> _assetHandles =
             new Dictionary<UnityEngine.Object, Stack<AssetHandleRecord>>();
 
@@ -42,7 +40,19 @@ namespace GameFramework.Core
         public void OnInit()
         {
             _isDestroyed = false;
-            _initializeTask = InitializeAddressablesAsync();
+        }
+
+        public async UniTask OnInitAsync(CancellationToken cancellationToken)
+        {
+            bool initialized = await EnsureInitializedAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!initialized)
+            {
+                throw new InvalidOperationException(
+                    _initializeException != null
+                        ? $"Addressables 初始化失败: {_initializeException.Message}"
+                        : "Addressables 初始化失败。");
+            }
         }
 
         private async Task InitializeAddressablesAsync()
@@ -52,6 +62,11 @@ namespace GameFramework.Core
             {
                 handle = Addressables.InitializeAsync(false);
                 await handle.Task;
+
+                if (_isDestroyed)
+                {
+                    return;
+                }
 
                 if (handle.Status == AsyncOperationStatus.Succeeded)
                 {
@@ -99,6 +114,11 @@ namespace GameFramework.Core
             _pendingOperationCount = 0;
         }
 
+        public UniTask OnDestroyAsync(CancellationToken cancellationToken)
+        {
+            return UniTask.CompletedTask;
+        }
+
         /// <summary>
         /// 等待 Addressables 初始化完成。建议在启动流程或热更流程正式加载资源前显式调用。
         /// </summary>
@@ -120,7 +140,7 @@ namespace GameFramework.Core
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await _initializeTask;
+                await _initializeTask.AsUniTask().AttachExternalCancellation(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
@@ -307,18 +327,23 @@ namespace GameFramework.Core
         /// </summary>
         public void ReleaseAsset(object asset)
         {
-            if (asset == null) return;
+            TryReleaseAsset(asset);
+        }
+
+        public bool TryReleaseAsset(object asset)
+        {
+            if (asset == null) return false;
 
             if (!(asset is UnityEngine.Object unityAsset))
             {
                 Log.Warning($"[Resource] ReleaseAsset 忽略非 UnityEngine.Object 对象: {asset.GetType().Name}");
-                return;
+                return false;
             }
 
             if (!_assetHandles.TryGetValue(unityAsset, out var handles) || handles.Count == 0)
             {
                 Log.Warning($"[Resource] ReleaseAsset 找不到资源句柄，可能重复释放或资源不是由 ResourceModule 加载: {GetSafeObjectName(unityAsset)}");
-                return;
+                return false;
             }
 
             AssetHandleRecord record = handles.Pop();
@@ -328,6 +353,8 @@ namespace GameFramework.Core
             {
                 _assetHandles.Remove(unityAsset);
             }
+
+            return true;
         }
 
         /// <summary>
@@ -336,25 +363,33 @@ namespace GameFramework.Core
         /// </summary>
         public void ReleaseInstance(GameObject instance)
         {
-            if (ReferenceEquals(instance, null)) return;
+            TryReleaseInstance(instance);
+        }
+
+        /// <summary>
+        /// 只释放由 ResourceModule.InstantiateAsync 创建并追踪的实例。
+        /// 未追踪对象的所有权未知，因此不会擅自 Destroy。
+        /// </summary>
+        public bool TryReleaseInstance(GameObject instance)
+        {
+            if (ReferenceEquals(instance, null)) return false;
 
             if (!_instanceHandles.TryGetValue(instance, out var record))
             {
-                Log.Warning($"[Resource] ReleaseInstance 找不到实例句柄，改用 Destroy 清理对象: {GetSafeObjectName(instance)}");
-                if (instance != null)
-                {
-                    UnityEngine.Object.Destroy(instance);
-                }
-                return;
+                Log.Warning(
+                    $"[Resource] ReleaseInstance 找不到实例句柄，已保留对象并交还调用方处理: {GetSafeObjectName(instance)}");
+                return false;
             }
 
             _instanceHandles.Remove(instance);
             ReleaseInstanceHandle(record.Handle);
+            return true;
         }
 
         /// <summary>
         /// 主动释放所有已追踪资源。通常只在切换大流程或退出游戏时调用。
         /// </summary>
+        [Obsolete("全局 ReleaseAll 可能释放其他 owner 的资源。请优先使用 ResourceScope 管理局部生命周期。")]
         public void ReleaseAll()
         {
             ReleaseAllInstances();

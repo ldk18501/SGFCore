@@ -13,8 +13,9 @@ namespace GameFramework.Core
         private readonly Dictionary<string, List<Action<RedPointSnapshot>>> _listeners =
             new Dictionary<string, List<Action<RedPointSnapshot>>>();
         private readonly Dictionary<object, HashSet<string>> _ownerPaths = new Dictionary<object, HashSet<string>>();
-
-        public int Priority => 49;
+        private readonly HashSet<RedPointNode> _batchedNodeSet = new HashSet<RedPointNode>();
+        private readonly List<RedPointNode> _batchedNodes = new List<RedPointNode>();
+        private int _batchDepth;
 
         public void OnInit()
         {
@@ -30,6 +31,9 @@ namespace GameFramework.Core
             _nodes.Clear();
             _listeners.Clear();
             _ownerPaths.Clear();
+            _batchedNodeSet.Clear();
+            _batchedNodes.Clear();
+            _batchDepth = 0;
             Debug.Log("[Framework] RedPointModule destroyed.");
         }
 
@@ -37,6 +41,15 @@ namespace GameFramework.Core
         {
             RedPointNode node = GetNode(path);
             return node != null ? node.TotalCount : 0;
+        }
+
+        /// <summary>
+        /// 合并一组红点修改的通知。计数会立即更新，但监听器和全局事件只在最外层批次结束后触发一次。
+        /// </summary>
+        public IDisposable BeginBatch()
+        {
+            _batchDepth++;
+            return new BatchScope(this);
         }
 
         public int GetSelfCount(string path)
@@ -286,6 +299,21 @@ namespace GameFramework.Core
 
         private void NotifyChanged(RedPointNode node)
         {
+            if (_batchDepth > 0)
+            {
+                if (_batchedNodeSet.Add(node))
+                {
+                    _batchedNodes.Add(node);
+                }
+
+                return;
+            }
+
+            NotifyChangedImmediately(node);
+        }
+
+        private void NotifyChangedImmediately(RedPointNode node)
+        {
             RedPointSnapshot snapshot = node.CreateSnapshot();
 
             if (_listeners.TryGetValue(node.Path, out List<Action<RedPointSnapshot>> listeners))
@@ -293,7 +321,14 @@ namespace GameFramework.Core
                 Action<RedPointSnapshot>[] copiedListeners = listeners.ToArray();
                 for (int i = 0; i < copiedListeners.Length; i++)
                 {
-                    copiedListeners[i].Invoke(snapshot);
+                    try
+                    {
+                        copiedListeners[i].Invoke(snapshot);
+                    }
+                    catch (Exception exception)
+                    {
+                        Debug.LogException(exception);
+                    }
                 }
             }
 
@@ -302,6 +337,22 @@ namespace GameFramework.Core
             {
                 eventModule.Broadcast(new RedPointChangedEvent(snapshot));
             }
+        }
+
+        private void EndBatch()
+        {
+            if (_batchDepth <= 0 || --_batchDepth > 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < _batchedNodes.Count; i++)
+            {
+                NotifyChangedImmediately(_batchedNodes[i]);
+            }
+
+            _batchedNodes.Clear();
+            _batchedNodeSet.Clear();
         }
 
         private RedPointNode GetNode(string path)
@@ -523,6 +574,27 @@ namespace GameFramework.Core
             public RedPointSnapshot CreateSnapshot()
             {
                 return new RedPointSnapshot(Path, TotalCount, SelfCount, ChildCount);
+            }
+        }
+
+        private sealed class BatchScope : IDisposable
+        {
+            private RedPointModule _owner;
+
+            public BatchScope(RedPointModule owner)
+            {
+                _owner = owner;
+            }
+
+            public void Dispose()
+            {
+                if (_owner == null)
+                {
+                    return;
+                }
+
+                _owner.EndBatch();
+                _owner = null;
             }
         }
     }

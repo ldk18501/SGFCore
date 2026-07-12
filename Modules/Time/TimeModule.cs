@@ -34,16 +34,15 @@ namespace GameFramework.Core
     /// </summary>
     public sealed class TimeModule : IFrameworkModule
     {
-        public int Priority => 17;
-
         public bool HasServerTime { get; private set; }
         public double ServerOffsetSeconds { get; private set; }
         public int DailyResetHour { get; private set; } = 0;
+        public TimeZoneInfo ServerTimeZone { get; private set; } = TimeZoneInfo.Local;
 
         private DateTime _lastNow;
 
         public DateTime UtcNow => DateTime.UtcNow.AddSeconds(ServerOffsetSeconds);
-        public DateTime Now => UtcNow.ToLocalTime();
+        public DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(UtcNow, ServerTimeZone);
         public long UnixTimeSeconds => TimeUtility.GetTimestampSeconds(UtcNow);
         public long UnixTimeMilliseconds => TimeUtility.GetTimestampMilliseconds(UtcNow);
 
@@ -71,6 +70,31 @@ namespace GameFramework.Core
         public void SetDailyResetHour(int hour)
         {
             DailyResetHour = Math.Max(0, Math.Min(23, hour));
+        }
+
+        public bool SetServerTimeZone(string timeZoneId)
+        {
+            if (string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                return false;
+            }
+
+            try
+            {
+                ServerTimeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                _lastNow = Now;
+                return true;
+            }
+            catch (TimeZoneNotFoundException exception)
+            {
+                Log.Warning($"[Time] 找不到服务器时区: {timeZoneId}, {exception.Message}");
+                return false;
+            }
+            catch (InvalidTimeZoneException exception)
+            {
+                Log.Warning($"[Time] 服务器时区无效: {timeZoneId}, {exception.Message}");
+                return false;
+            }
         }
 
         public void SyncServerTime(DateTime serverUtcTime)

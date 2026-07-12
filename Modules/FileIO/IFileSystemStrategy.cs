@@ -9,6 +9,7 @@
         
         string ReadText(string filePath);
         void WriteText(string filePath, string content);
+        void WriteTextAtomic(string filePath, string content);
         
         byte[] ReadBytes(string filePath);
         void WriteBytes(string filePath, byte[] bytes);

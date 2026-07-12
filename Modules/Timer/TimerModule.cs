@@ -5,8 +5,6 @@ namespace GameFramework.Core
 {
     public class TimerModule : IFrameworkModule
     {
-        public int Priority => 16; 
-
         // 内部的定时器任务类，实现 IReference 以便被内存池复用
         private class TimerTask : IReference
         {
@@ -54,8 +52,17 @@ namespace GameFramework.Core
 
                 if (task.CurrentTime >= task.Delay)
                 {
-                    task.Callback?.Invoke();
-                    if (task.IsDone || !_tasks.Contains(task))
+                    long executingTimerId = task.Id;
+                    try
+                    {
+                        task.Callback?.Invoke();
+                    }
+                    catch (Exception exception)
+                    {
+                        Log.Error($"[Timer] 定时器回调异常: id={executingTimerId}, error={exception}");
+                    }
+                    int currentIndex = _tasks.IndexOf(task);
+                    if (task.IsDone || task.Id != executingTimerId || currentIndex < 0)
                     {
                         continue;
                     }
@@ -65,7 +72,7 @@ namespace GameFramework.Core
                     if (task.LoopCount == 0)
                     {
                         task.IsDone = true;
-                        _tasks.RemoveAt(i);
+                        _tasks.RemoveAt(currentIndex);
                         _pool.ReleaseClass(task);
                     }
                     else

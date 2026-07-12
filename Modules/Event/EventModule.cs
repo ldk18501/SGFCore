@@ -10,9 +10,6 @@ namespace GameFramework.Core
     /// </summary>
     public class EventModule : IFrameworkModule
     {
-        // 优先级设置得非常高（值越小越早），因为其他模块初始化时可能就需要注册事件
-        public int Priority => 10;
-
         // 存储所有事件委托的字典（使用List避免Delegate.Combine的GC）
         private readonly Dictionary<Type, List<Delegate>> _delegates = new Dictionary<Type, List<Delegate>>();
 
@@ -93,11 +90,31 @@ namespace GameFramework.Core
             Type type = typeof(T);
             if (_delegates.TryGetValue(type, out var list))
             {
-                Delegate[] snapshot = list.ToArray();
+                int count = list.Count;
+                Delegate[] snapshot = System.Buffers.ArrayPool<Delegate>.Shared.Rent(count);
+                list.CopyTo(snapshot, 0);
 
-                for (int i = 0; i < snapshot.Length; i++)
+                try
                 {
-                    ((Action<T>)snapshot[i]).Invoke(eventData);
+                    for (int i = 0; i < count; i++)
+                    {
+                        try
+                        {
+                            ((Action<T>)snapshot[i]).Invoke(eventData);
+                        }
+                        catch (Exception exception)
+                        {
+                            Log.Error(
+                                $"[Event] 监听器执行失败: event={type.Name}, " +
+                                $"listener={snapshot[i]?.Method?.DeclaringType?.Name}.{snapshot[i]?.Method?.Name}, " +
+                                $"error={exception}");
+                        }
+                    }
+                }
+                finally
+                {
+                    Array.Clear(snapshot, 0, count);
+                    System.Buffers.ArrayPool<Delegate>.Shared.Return(snapshot);
                 }
             }
         }

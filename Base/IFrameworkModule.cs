@@ -1,6 +1,5 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 
 namespace GameFramework.Core
 {
@@ -9,11 +8,6 @@ namespace GameFramework.Core
     /// </summary>
     public interface IFrameworkModule
     {
-        /// <summary>
-        /// 模块优先级（决定初始化和轮询的顺序，越小越早）
-        /// </summary>
-        int Priority { get; }
-
         /// <summary>
         /// 模块初始化
         /// </summary>
@@ -30,5 +24,15 @@ namespace GameFramework.Core
         /// 模块清理与销毁
         /// </summary>
         void OnDestroy();
+    }
+
+    /// <summary>
+    /// 需要等待异步准备或异步释放的框架模块。
+    /// 同步 OnInit/OnDestroy 仍分别作为异步阶段前后的轻量生命周期钩子。
+    /// </summary>
+    public interface IAsyncFrameworkModule : IFrameworkModule
+    {
+        UniTask OnInitAsync(CancellationToken cancellationToken);
+        UniTask OnDestroyAsync(CancellationToken cancellationToken);
     }
 }

@@ -144,6 +144,7 @@ Assets/SGFCore/Modules/Config/ConfigExportSettings.asset
 - 多语言表类名和 bytes 前缀
 - 是否自动设置 Addressables
 - Addressables Group
+- 生成代码命名空间
 
 ## 注意事项
 
