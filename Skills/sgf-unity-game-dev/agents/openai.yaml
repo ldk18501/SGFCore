@@ -1,0 +1,4 @@
+interface:
+  display_name: "SGF Unity 游戏开发"
+  short_description: "基于 SGFCore 规范实现 Unity 游戏功能与内容管线"
+  default_prompt: "使用 $sgf-unity-game-dev 基于当前 SGFCore 工程实现一个 Unity 游戏功能。"
